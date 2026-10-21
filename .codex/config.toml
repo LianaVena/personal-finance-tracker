@@ -1,0 +1,16 @@
+approval_policy = "on-request"
+default_permissions = "banking-safe"
+
+[windows]
+sandbox = "mxc"
+
+[permissions.banking-safe]
+description = "Read-only project access with internet"
+extends = ":read-only"
+
+[permissions.banking-safe.filesystem.":workspace_roots"]
+"imports" = "deny"
+"banking.db" = "deny"
+
+[permissions.banking-safe.network]
+enabled = true

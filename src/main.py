@@ -15,15 +15,6 @@ from importer import import_csv_files
 DB_PATH = Path(__file__).resolve().parent.parent / "banking.db"
 
 
-def on_shutdown():
-    """Handle application shutdown cleanup.
-
-    Prints a termination message to stdout when the NiceGUI application stops.
-    """
-    print("Banking application stopped.")
-
-
-# TODO deduplication, errors on shut down
 def main():
     """Initialize the database, import pending data, and launch the UI.
 
@@ -40,17 +31,18 @@ def main():
                 f"from {result.filename} ({result.bank})"
             )
 
-    app.on_shutdown(on_shutdown)
-
     ui.label("Banking Transaction Viewer")
     ui.button("Exit application", on_click=app.shutdown)
 
-    ui.run(
-        host="127.0.0.1",
-        port=8765,
-        reload=False,
-        show=False,
-    )
+    try:
+        ui.run(
+            host="127.0.0.1",
+            port=8765,
+            reload=False,
+            show=False,
+        )
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ in {"__main__", "__mp_main__"}:

@@ -370,8 +370,8 @@ def import_csv_files(db_path: str | Path, csv_dir: str | Path = IMPORTS_DIR) -> 
     transactions and import-log entry commit together; a failure rolls
     back that file while earlier successful files remain committed.
     Empty rows are ignored. SHA-256 hashes identify previously imported
-    file contents; overlapping transactions in different exports are
-    not deduplicated.
+    file contents; normalized transaction rows are also deduplicated across
+    files, including rows already present before importing began.
 
     Args:
         db_path: SQLite database path with an existing transactions table.
@@ -402,6 +402,10 @@ def import_csv_files(db_path: str | Path, csv_dir: str | Path = IMPORTS_DIR) -> 
     columns_sql = ", ".join(TRANSACTION_COLUMNS)
     placeholders = ", ".join("?" for _ in TRANSACTION_COLUMNS)
     insert_sql = f"INSERT INTO transactions ({columns_sql}) VALUES ({placeholders})"
+    duplicate_sql = (
+            "SELECT COUNT(*) FROM transactions WHERE "
+            + " AND ".join(f"{column} IS ?" for column in TRANSACTION_COLUMNS)
+    )
 
     with closing(sqlite3.connect(db_path)) as connection:
         connection.execute("""
@@ -428,17 +432,20 @@ def import_csv_files(db_path: str | Path, csv_dir: str | Path = IMPORTS_DIR) -> 
 
                 bank, header, rows = _parse_csv(data, path.name)
                 count = 0
+                seen_rows: Counter[tuple[object, ...]] = Counter()
                 for row_number, row in enumerate(rows, start=2):
                     if not row or all(not cell.strip() for cell in row):
                         continue
                     try:
                         record = _move_symbols_from_payer_reference(_parse_transaction_row(bank, header, row))
-                        connection.execute(
-                            insert_sql, tuple(record[col] for col in TRANSACTION_COLUMNS)
-                        )
+                        values = tuple(record[col] for col in TRANSACTION_COLUMNS)
+                        seen_rows[values] += 1
+                        existing_count = connection.execute(duplicate_sql, values).fetchone()[0]
+                        if seen_rows[values] > existing_count:
+                            connection.execute(insert_sql, values)
+                            count += 1
                     except (ValueError, sqlite3.Error) as exc:
                         raise ValueError(f"{path.name}, row {row_number}: {exc}") from exc
-                    count += 1
 
                 connection.execute(
                     "INSERT INTO imported_files (sha256, filename, source_bank, rows_imported) "

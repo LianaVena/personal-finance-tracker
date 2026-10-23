@@ -160,6 +160,49 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
         self.assertEqual([(r.filename, r.skipped) for r in results], [("a.csv", False), ("b.csv", True)])
         self.assertEqual(self.count_transactions(), 1)
 
+    def test_overlapping_exports_only_import_new_rows(self):
+        """Import rows unique to an export while skipping rows already stored."""
+        first = tb_row(description="first")
+        overlap = tb_row(amount="20,00", description="overlap")
+        new = tb_row(amount="30,00", description="new")
+        self.write_tb("a.csv", [first, overlap])
+        self.write_tb("b.csv", [overlap, new])
+
+        results = self.run_import()
+
+        self.assertEqual([(result.rows_imported, result.skipped) for result in results],
+                         [(2, False), (1, False)])
+        self.assertEqual(
+            [row["description"] for row in self.query(
+                "SELECT description FROM transactions ORDER BY id")],
+            ["first", "overlap", "new"],
+        )
+
+    def test_overlapping_export_preserves_repeated_row_occurrences(self):
+        """Keep repeated identical transactions up to their count in the new CSV."""
+        repeated = tb_row(description="same transaction details")
+        self.write_tb("a.csv", [repeated])
+        self.run_import()
+        self.write_tb("b.csv", [repeated, repeated])
+
+        result = self.run_import()[1]
+
+        self.assertEqual(result.rows_imported, 1)
+        self.assertEqual(self.count_transactions(), 2)
+
+    def test_rows_that_differ_in_a_transaction_field_are_not_deduplicated(self):
+        """Retain transactions with otherwise matching fields but different amounts."""
+        self.write_tb("a.csv", [tb_row(amount="10,00", description="same")])
+        self.write_tb("b.csv", [tb_row(amount="11,00", description="same")])
+
+        results = self.run_import()
+
+        self.assertEqual([result.rows_imported for result in results], [1, 1])
+        self.assertEqual(
+            [row["amount"] for row in self.query("SELECT amount FROM transactions ORDER BY id")],
+            [1000, 1100],
+        )
+
     # ------------------------------------------------------------------ failures
 
     def test_bad_row_rolls_back_the_whole_file_and_reports_file_and_row(self):

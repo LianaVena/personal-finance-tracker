@@ -1,1 +1,2 @@
+# Requires Python 3.11 or newer (src/transaction_types.py uses StrEnum).
 nicegui

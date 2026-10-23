@@ -76,6 +76,20 @@ class MainTests(unittest.TestCase):
                 "SELECT name FROM sqlite_master WHERE type = 'table'")}
         self.assertIn("transactions", tables)
 
+    def test_main_creates_the_table_before_starting_csv_import(self):
+        """Ensure database initialization precedes importing CSV files."""
+        events = []
+        with mock.patch.dict(self.main.__dict__, {
+            "DB_PATH": self.db_path,
+            "create_transactions_table": mock.Mock(
+                side_effect=lambda path: events.append(("create", path))),
+            "import_csv_files": mock.Mock(
+                side_effect=lambda path: events.append(("import", path)) or []),
+        }), contextlib.redirect_stdout(io.StringIO()):
+            self.main.main()
+
+        self.assertEqual(events, [("create", self.db_path), ("import", self.db_path)])
+
     def test_main_reports_imported_files_but_not_skipped_ones(self):
         """Print summaries for imported files and omit skipped files."""
         output, _ = self.run_main([
@@ -93,6 +107,14 @@ class MainTests(unittest.TestCase):
         self.ui.label.assert_called_once_with("Banking Transaction Viewer")
         self.ui.button.assert_called_once_with("Exit application", on_click=self.app.shutdown)
         self.ui.run.assert_called_once_with(host="127.0.0.1", port=8765, reload=False, show=False)
+
+    def test_keyboard_interrupt_while_running_is_a_clean_shutdown(self):
+        """Handle Ctrl+C from the web server as a normal application shutdown."""
+        self.ui.run.side_effect = KeyboardInterrupt
+
+        self.run_main([])
+
+        self.ui.run.assert_called_once()
 
     def test_shutdown_hook_is_registered_and_prints_a_message(self):
         """Register the shutdown callback and print its stop message."""

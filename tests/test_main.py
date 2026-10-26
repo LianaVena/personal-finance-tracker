@@ -1,129 +1,136 @@
-"""
-Tests for main.py.
-
-nicegui is replaced by a fake module, so these tests never start a web server
-and do not need nicegui to be installed.
-"""
+"""Tests for application startup without opening databases or starting a server."""
 
 import contextlib
 import importlib
 import io
-import sqlite3
 import sys
 import tempfile
 import types
 import unittest
-from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
-
-from src.importer import ImportResult
 
 
 class MainTests(unittest.TestCase):
-    """Test the application's startup and main entry point."""
+    """Test application startup with mocked UI and isolated paths."""
 
     def setUp(self):
-        """Load main with a fake NiceGUI module and a temporary database path."""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.db_path = Path(tmp.name) / "banking.db"
+        """Install a fake NiceGUI module and import the packaged entry point."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.transactions_path = self.root / "transactions.db"
+        self.finance_path = self.root / "finance.db"
 
         self.app = mock.Mock(name="app")
         self.ui = mock.Mock(name="ui")
         fake_nicegui = types.ModuleType("nicegui")
         fake_nicegui.app = self.app
         fake_nicegui.ui = self.ui
-
         patcher = mock.patch.dict(sys.modules, {"nicegui": fake_nicegui})
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        sys.modules.pop("main", None)
-        self.main = importlib.import_module("main")
-        self.addCleanup(lambda: sys.modules.pop("main", None))
+        sys.modules.pop("src.main", None)
+        self.main = importlib.import_module("src.main")
+        self.addCleanup(lambda: sys.modules.pop("src.main", None))
 
     def run_main(self, results):
-        """Run main with mocked import results and capture its console output."""
+        """Run startup with mocked database work and capture its output.
+
+        Args:
+            results: Synthetic import results returned by the mocked importer.
+
+        Returns:
+            Captured standard output and the mocked importer.
+        """
         output = io.StringIO()
-        importer_mock = mock.Mock(return_value=results)
+        importer = mock.Mock(return_value=results)
         with mock.patch.dict(self.main.__dict__, {
-            "DB_PATH": self.db_path,
-            "import_csv_files": importer_mock,
+            "TRANSACTIONS_DB_PATH": self.transactions_path,
+            "FINANCE_DB_PATH": self.finance_path,
+            "create_transactions_table": mock.Mock(),
+            "create_finance_tables": mock.Mock(),
+            "import_csv_files": importer,
+            "apply_matching_rules": mock.Mock(return_value=0),
+            "inactivate_stale_subscriptions": mock.Mock(return_value=0),
+            "build_ui": mock.Mock(),
         }), contextlib.redirect_stdout(output):
             self.main.main()
-        return output.getvalue(), importer_mock
+        return output.getvalue(), importer
 
-    def test_db_path_is_banking_db_next_to_the_src_folder(self):
-        """Place the default database beside the source directory."""
+    def test_default_database_paths_are_separate(self):
+        """Place the transaction and finance databases at separate paths."""
         module_file = self.main.__file__
-        if module_file is None:
-            self.fail("The imported main module has no file path")
-        expected = Path(module_file).resolve().parent.parent / "banking.db"
-        self.assertEqual(self.main.DB_PATH, expected)
+        assert module_file is not None, "Main module has no source file"
+        root = Path(module_file).resolve().parent.parent
+        self.assertEqual(self.main.TRANSACTIONS_DB_PATH, root / "transactions.db")
+        self.assertEqual(self.main.FINANCE_DB_PATH, root / "finance.db")
 
-    def test_importing_the_module_does_not_start_anything(self):
-        """Avoid starting the UI or registering shutdown work on import."""
-        self.ui.run.assert_not_called()
-        self.app.on_shutdown.assert_not_called()
-
-    def test_main_creates_the_table_before_importing(self):
-        """Create the transactions table and pass the configured path to import."""
-        _, importer_mock = self.run_main([])
-        importer_mock.assert_called_once_with(self.db_path)
-        with closing(sqlite3.connect(self.db_path)) as connection:
-            tables = {row[0] for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'")}
-        self.assertIn("transactions", tables)
-
-    def test_main_creates_the_table_before_starting_csv_import(self):
-        """Ensure database initialization precedes importing CSV files."""
+    def test_startup_validates_finance_before_transactions_or_imports(self):
+        """Initialize persistent finance data before transaction imports."""
         events = []
         with mock.patch.dict(self.main.__dict__, {
-            "DB_PATH": self.db_path,
+            "TRANSACTIONS_DB_PATH": self.transactions_path,
+            "FINANCE_DB_PATH": self.finance_path,
             "create_transactions_table": mock.Mock(
-                side_effect=lambda path: events.append(("create", path))),
+                side_effect=lambda path: events.append(("transactions", path))),
+            "create_finance_tables": mock.Mock(
+                side_effect=lambda path: events.append(("finance", path))),
             "import_csv_files": mock.Mock(
                 side_effect=lambda path: events.append(("import", path)) or []),
+            "apply_matching_rules": mock.Mock(
+                side_effect=lambda transactions, finance: events.append(("categorize", transactions, finance)) or 0),
+            "inactivate_stale_subscriptions": mock.Mock(
+                side_effect=lambda transactions, finance: events.append(("inactivate", transactions, finance)) or 0),
+            "build_ui": mock.Mock(
+                side_effect=lambda transaction_path, finance_path:
+                events.append(("ui", transaction_path, finance_path))),
         }), contextlib.redirect_stdout(io.StringIO()):
             self.main.main()
 
-        self.assertEqual(events, [("create", self.db_path), ("import", self.db_path)])
-
-    def test_main_reports_imported_files_but_not_skipped_ones(self):
-        """Print summaries for imported files and omit skipped files."""
-        output, _ = self.run_main([
-            ImportResult("a.csv", "TB", 3),
-            ImportResult("b.csv", "FIO", 0, skipped=True),
-            ImportResult("c.csv", "FIO", 1),
+        self.assertEqual(events, [
+            ("finance", self.finance_path),
+            ("transactions", self.transactions_path),
+            ("import", self.transactions_path),
+            ("categorize", self.transactions_path, self.finance_path),
+            ("inactivate", self.transactions_path, self.finance_path),
+            ("ui", self.transactions_path, self.finance_path),
         ])
-        self.assertIn("Imported 3 transactions from a.csv (TB)", output)
-        self.assertIn("Imported 1 transactions from c.csv (FIO)", output)
-        self.assertNotIn("b.csv", output)
 
-    def test_main_builds_the_page_and_runs_the_server_on_localhost(self):
-        """Build the exit control and run NiceGUI on the expected local address."""
-        self.run_main([])
-        self.ui.label.assert_called_once_with("Banking Transaction Viewer")
-        self.ui.button.assert_called_once_with("Exit application", on_click=self.app.shutdown)
-        self.ui.run.assert_called_once_with(host="127.0.0.1", port=8765, reload=False, show=False)
+    def test_existing_finance_schema_error_stops_before_transaction_database_or_import(self):
+        """Stop startup before imports when the existing finance schema is invalid."""
+        transaction_initializer = mock.Mock()
+        importer = mock.Mock()
+        with mock.patch.dict(self.main.__dict__, {
+            "TRANSACTIONS_DB_PATH": self.transactions_path,
+            "FINANCE_DB_PATH": self.finance_path,
+            "create_finance_tables": mock.Mock(side_effect=RuntimeError("legacy finance schema")),
+            "create_transactions_table": transaction_initializer,
+            "import_csv_files": importer,
+        }), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "legacy finance schema"):
+                self.main.main()
+        transaction_initializer.assert_not_called()
+        importer.assert_not_called()
 
-    def test_keyboard_interrupt_while_running_is_a_clean_shutdown(self):
-        """Handle Ctrl+C from the web server as a normal application shutdown."""
+    def test_reports_new_imports_and_omits_skipped_files(self):
+        """Report newly imported rows without reporting skipped files."""
+        output, importer = self.run_main([
+            SimpleNamespace(filename="new.csv", bank="TB", rows_imported=2, skipped=False),
+            SimpleNamespace(filename="old.csv", bank="FIO", rows_imported=0, skipped=True),
+        ])
+        importer.assert_called_once_with(self.transactions_path)
+        self.assertIn("Imported 2 transactions from new.csv (TB)", output)
+        self.assertNotIn("old.csv", output)
+
+    def test_builds_interface_and_runs_locally_with_keyboard_interrupt_handling(self):
+        """Start NiceGUI on localhost and handle an interrupted local run."""
         self.ui.run.side_effect = KeyboardInterrupt
-
-        self.run_main([])
-
-        self.ui.run.assert_called_once()
-
-    def test_shutdown_hook_is_registered_and_prints_a_message(self):
-        """Register the shutdown callback and print its stop message."""
-        self.run_main([])
-        self.app.on_shutdown.assert_called_once_with(self.main.on_shutdown)
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            self.main.on_shutdown()
-        self.assertEqual(output.getvalue().strip(), "Banking application stopped.")
+        _, importer = self.run_main([])
+        importer.assert_called_once_with(self.transactions_path)
+        self.ui.run.assert_called_once_with(host="127.0.0.1", port=8765, reload=False, show=True)
 
 
 if __name__ == "__main__":

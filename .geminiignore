@@ -1,6 +1,8 @@
 # Private bank statements and imported financial records
 /imports/
 *.csv
+/transactions.db
+/finance.db
 
 # SQLite databases and their sidecar files
 *.db

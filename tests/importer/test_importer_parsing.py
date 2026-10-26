@@ -5,7 +5,7 @@ import unittest
 # noinspection PyProtectedMember
 from src.importer import _to_iso_date, _to_minor_units, _normalize_domestic_bank_code, _normalize_payer_reference, \
     _move_symbols_from_payer_reference, _parse_csv, FIO_HEADERS, TB_HEADERS
-from support import fio_bytes, fio_row, tb_bytes, tb_row
+from tests.support import fio_bytes, fio_row, tb_bytes, tb_row
 
 
 class IsoDateTests(unittest.TestCase):
@@ -151,7 +151,14 @@ class PayerReferenceTests(unittest.TestCase):
 
 
 def make_record(**overrides):
-    """Create a dummy transaction record dictionary with symbol fields."""
+    """Create a dummy transaction record dictionary with symbol fields.
+
+    Args:
+        **overrides: Field values that replace the helper's default values.
+
+    Returns:
+        Dummy record mapping suitable for payer-reference symbol tests.
+    """
     record = {"payer_reference": None, "variable_symbol": None,
               "specific_symbol": None, "constant_symbol": None}
     record.update(overrides)
@@ -159,7 +166,15 @@ def make_record(**overrides):
 
 
 def moved(reference, **columns):
-    """Construct a record and apply _move_symbols_from_payer_reference."""
+    """Construct a record and apply _move_symbols_from_payer_reference.
+
+    Args:
+        reference: Synthetic payer-reference text.
+        **columns: Other record fields supplied to the record builder.
+
+    Returns:
+        Normalized record after extracting structured symbol values.
+    """
     return _move_symbols_from_payer_reference(make_record(payer_reference=reference, **columns))
 
 
@@ -167,7 +182,15 @@ class SymbolsFromPayerReferenceTests(unittest.TestCase):
     """Test suite for extracting VS, SS, and KS symbols from payer reference strings."""
 
     def assert_symbols(self, record, vs, ss, ks, reference=None):
-        """Assert expected symbol values and remaining payer_reference in a record."""
+        """Assert expected symbol values and remaining payer_reference in a record.
+
+        Args:
+            record: Normalized transaction record under test.
+            vs: Expected variable symbol.
+            ss: Expected specific symbol.
+            ks: Expected constant symbol.
+            reference: Expected remaining payer reference.
+        """
         self.assertEqual(
             (record["variable_symbol"], record["specific_symbol"], record["constant_symbol"],
              record["payer_reference"]),

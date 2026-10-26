@@ -10,7 +10,8 @@ extends = ":read-only"
 
 [permissions.banking-safe.filesystem.":workspace_roots"]
 "imports" = "deny"
-"banking.db" = "deny"
+"transactions.db" = "deny"
+"finance.db" = "deny"
 
 [permissions.banking-safe.network]
 enabled = true

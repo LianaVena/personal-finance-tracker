@@ -1,5 +1,6 @@
 /imports/
-/banking.db
+/transactions.db
+/finance.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

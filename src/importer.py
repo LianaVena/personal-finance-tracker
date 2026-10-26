@@ -3,6 +3,7 @@
 import csv
 import hashlib
 import io
+import json
 import re
 import sqlite3
 from collections import Counter, defaultdict
@@ -12,7 +13,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from transaction_types import translate_transaction_type
+from .database import connect_database
+from .transaction_types import translate_transaction_type
 
 IMPORTS_DIR = Path(__file__).resolve().parent.parent / "imports"
 
@@ -46,6 +48,39 @@ TRANSACTION_COLUMNS = (
     "initiated_by", "amount_related", "currency_related",
 )
 
+# Frozen fingerprint fields and their order: do not change them without an
+# explicit ID compatibility plan, or notes in finance.db will lose their links.
+TRANSACTION_ID_COLUMNS_V1 = (
+    "source_bank", "booking_date", "value_date", "amount", "currency",
+    "transaction_type", "counterparty_name", "counterparty_iban",
+    "counterparty_bic", "counterparty_bank_code", "counterparty_bank_name",
+    "description", "payer_reference", "payment_message",
+    "variable_symbol", "specific_symbol", "constant_symbol",
+    "bank_transaction_id", "payment_instruction_id", "initiated_by",
+    "amount_related", "currency_related",
+)
+
+
+def generate_transaction_id(record: dict[str, object]) -> str:
+    """Create a deterministic lowercase SHA-256 ID from normalized CSV data.
+
+    Version and serialization MUST remain unchanged for existing finance.db
+    transaction references. The bank and all currently imported fields are part
+    of the fingerprint. Do not include the CSV filename or database row order.
+
+    Args:
+        record: Normalized transaction fields in the canonical import format.
+
+    Returns:
+        A lowercase 64-character SHA-256 hexadecimal transaction ID.
+    """
+    payload = json.dumps(
+        ["transaction-v1", *(record[field] for field in TRANSACTION_ID_COLUMNS_V1)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
 
 @dataclass(frozen=True)
 class ImportResult:
@@ -55,7 +90,7 @@ class ImportResult:
         filename: Name of the CSV file, without its directory.
         bank: Detected source bank, either "FIO" or "TB".
         rows_imported: Number of transactions inserted during this import.
-        skipped: Whether identical file contents were previously imported.
+        skipped: Whether a nonempty CSV contained no new transactions.
             Defaults to False; skipped files have zero rows_imported.
     """
     filename: str
@@ -364,94 +399,72 @@ def _parse_transaction_row(bank: str, header: list[str], row: list[str]) -> dict
 
 
 def import_csv_files(db_path: str | Path, csv_dir: str | Path = IMPORTS_DIR) -> list[ImportResult]:
-    """Import new CSV files atomically and skip previously imported contents.
+    """Import bank CSVs atomically, deduplicating by stable transaction ID.
 
-    Files are processed in case-insensitive filename order. Each file's
-    transactions and import-log entry commit together; a failure rolls
-    back that file while earlier successful files remain committed.
-    Empty rows are ignored. SHA-256 hashes identify previously imported
-    file contents; normalized transaction rows are also deduplicated across
-    files, including rows already present before importing began.
+    All CSVs are parsed on every run. Rows already present in the database
+    (typically overlapping exports) are skipped. Identical rows *within the
+    same CSV* are ambiguous with a hash-only primary key and cause the file
+    to fail rather than silently lose a potentially separate transaction.
+
+    Each file is committed independently. A malformed file rolls back all its
+    new transactions but does not undo earlier successful imports.
 
     Args:
-        db_path: SQLite database path with an existing transactions table.
-            The imported_files tracking table is created if needed.
-        csv_dir: Directory containing CSV files, scanned without recursion
-            and created if missing. Defaults to IMPORTS_DIR.
+        db_path: Path to the transactions' database.
+        csv_dir: Directory containing supported bank CSV exports.
 
     Returns:
-        One ImportResult per CSV file in processing order. Skipped files
-        report zero imported rows. Returns an empty list if no CSVs exist.
-
-    Raises:
-        ValueError: A CSV format is unrecognized, or row validation or
-            insertion fails. Row errors include the filename and row number.
-        csv.Error: Strict CSV parsing encounters malformed input.
-        OSError: Directory creation, listing, or file reading fails.
-        sqlite3.Error: A database operation outside row insertion fails.
+        Import results for CSV files processed in filename order.
     """
     db_path = Path(db_path)
     csv_dir = Path(csv_dir)
     csv_dir.mkdir(parents=True, exist_ok=True)
     csv_files = sorted(
-        (p for p in csv_dir.iterdir() if p.is_file() and p.suffix.lower() == ".csv"),
-        key=lambda p: p.name.casefold(),
+        (path for path in csv_dir.iterdir() if path.is_file() and path.suffix.lower() == ".csv"),
+        key=lambda path: path.name.casefold(),
     )
 
     results: list[ImportResult] = []
-    columns_sql = ", ".join(TRANSACTION_COLUMNS)
-    placeholders = ", ".join("?" for _ in TRANSACTION_COLUMNS)
-    insert_sql = f"INSERT INTO transactions ({columns_sql}) VALUES ({placeholders})"
-    duplicate_sql = (
-            "SELECT COUNT(*) FROM transactions WHERE "
-            + " AND ".join(f"{column} IS ?" for column in TRANSACTION_COLUMNS)
+    insert_columns = ("id", *TRANSACTION_COLUMNS)
+    columns_sql = ", ".join(insert_columns)
+    placeholders = ", ".join("?" for _ in insert_columns)
+    insert_sql = (
+        f"INSERT INTO transactions ({columns_sql}) VALUES ({placeholders}) "
+        "ON CONFLICT(id) DO NOTHING"
     )
+    existing_sql = f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM transactions WHERE id = ?"
 
-    with closing(sqlite3.connect(db_path)) as connection:
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS imported_files (
-                sha256 TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                source_bank TEXT NOT NULL,
-                rows_imported INTEGER NOT NULL,
-                imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        connection.commit()
-
+    with closing(connect_database(db_path)) as connection:
         for path in csv_files:
             data = path.read_bytes()
-            file_hash = hashlib.sha256(data).hexdigest()
-            with connection:  # commit/rollback each file together with its import-log entry
-                previous = connection.execute(
-                    "SELECT source_bank FROM imported_files WHERE sha256 = ?", (file_hash,)
-                ).fetchone()
-                if previous:
-                    results.append(ImportResult(path.name, previous[0], 0, skipped=True))
-                    continue
-
-                bank, header, rows = _parse_csv(data, path.name)
-                count = 0
-                seen_rows: Counter[tuple[object, ...]] = Counter()
+            bank, header, rows = _parse_csv(data, path.name)
+            count = 0
+            processed = 0
+            seen_in_file: set[str] = set()
+            with connection:
                 for row_number, row in enumerate(rows, start=2):
                     if not row or all(not cell.strip() for cell in row):
                         continue
                     try:
                         record = _move_symbols_from_payer_reference(_parse_transaction_row(bank, header, row))
-                        values = tuple(record[col] for col in TRANSACTION_COLUMNS)
-                        seen_rows[values] += 1
-                        existing_count = connection.execute(duplicate_sql, values).fetchone()[0]
-                        if seen_rows[values] > existing_count:
-                            connection.execute(insert_sql, values)
+                        values = tuple(record[column] for column in TRANSACTION_COLUMNS)
+                        transaction_id = generate_transaction_id(record)
+                        if transaction_id in seen_in_file:
+                            raise ValueError(
+                                "identical transactions within one CSV cannot be represented "
+                                "by a hash-only primary key; review the source rows"
+                            )
+                        seen_in_file.add(transaction_id)
+                        processed += 1
+                        cursor = connection.execute(insert_sql, (transaction_id, *values))
+                        if cursor.rowcount == 1:
                             count += 1
+                        else:
+                            existing = connection.execute(existing_sql, (transaction_id,)).fetchone()
+                            if existing != values:
+                                raise ValueError("transaction ID collision with different row contents")
                     except (ValueError, sqlite3.Error) as exc:
                         raise ValueError(f"{path.name}, row {row_number}: {exc}") from exc
-
-                connection.execute(
-                    "INSERT INTO imported_files (sha256, filename, source_bank, rows_imported) "
-                    "VALUES (?, ?, ?, ?)",
-                    (file_hash, path.name, bank, count),
-                )
-            results.append(ImportResult(path.name, bank, count))
+            results.append(ImportResult(path.name, bank, count, skipped=(processed > 0 and count == 0)))
 
     return results

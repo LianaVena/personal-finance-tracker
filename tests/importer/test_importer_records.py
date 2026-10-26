@@ -4,16 +4,30 @@ import unittest
 
 # noinspection PyProtectedMember
 from src.importer import _parse_transaction_row, TB_HEADERS, FIO_HEADERS, TRANSACTION_COLUMNS
-from support import fio_row, tb_row
+from tests.support import fio_row, tb_row
 
 
 def tb_record(**kwargs):
-    """Parse a transaction row using the Tatra banka column layout."""
+    """Parse a transaction row using the Tatra banka column layout.
+
+    Args:
+        **kwargs: Synthetic column values passed to the Tatra banka row builder.
+
+    Returns:
+        Parsed transaction record.
+    """
     return _parse_transaction_row("TB", TB_HEADERS, tb_row(**kwargs))
 
 
 def fio_record(values=None):
-    """Parse a transaction row using the Fio bank column layout."""
+    """Parse a transaction row using the Fio bank column layout.
+
+    Args:
+        values: Synthetic Fio column values, or ``None`` for defaults.
+
+    Returns:
+        Parsed transaction record.
+    """
     return _parse_transaction_row("FIO", FIO_HEADERS, fio_row(values))
 
 

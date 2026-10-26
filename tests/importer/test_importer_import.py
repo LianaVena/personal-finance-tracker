@@ -1,6 +1,5 @@
 """Tests for CSV file importing, duplicate detection, failure handling, and symbol extraction."""
 
-import hashlib
 import unittest
 
 from src.importer import ImportResult, import_csv_files, TB_HEADERS
@@ -19,16 +18,28 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
     """Test suite for import_csv_files covering end-to-end import behaviors."""
 
     def write_tb(self, name, rows):
-        """Write Tatra banka rows to a CSV file in the test imports directory."""
+        """Write Tatra banka rows to a CSV file in the test imports directory.
+
+        Args:
+            name: Output CSV filename.
+            rows: Synthetic Tatra banka rows to serialize.
+
+        Returns:
+            Path to the written CSV file.
+        """
         return write_tb_csv(self.csv_dir / name, rows)
 
     def write_fio(self, name, rows):
-        """Write FIO rows to a CSV file in the test imports directory."""
-        return write_fio_csv(self.csv_dir / name, rows)
+        """Write FIO rows to a CSV file in the test imports directory.
 
-    def import_log(self):
-        """Retrieve all records from the imported_files tracking table."""
-        return self.query("SELECT * FROM imported_files ORDER BY filename")
+        Args:
+            name: Output CSV filename.
+            rows: Synthetic Fio rows to serialize.
+
+        Returns:
+            Path to the written CSV file.
+        """
+        return write_fio_csv(self.csv_dir / name, rows)
 
     # ------------------------------------------------------------------ happy paths
 
@@ -41,7 +52,7 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
         self.assertEqual(self.run_import(), [ImportResult("tb.csv", "TB", 2)])
         self.assertEqual(
             self.query("SELECT source_bank, amount, currency, transaction_type, description "
-                       "FROM transactions ORDER BY id"),
+                       "FROM transactions ORDER BY description"),
             [
                 {"source_bank": "TB", "amount": -1050, "currency": "EUR",
                  "transaction_type": "DEBIT", "description": "Coffee"},
@@ -59,7 +70,7 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
         self.assertEqual(self.run_import(), [ImportResult("fio.csv", "FIO", 2)])
         self.assertEqual(
             self.query("SELECT source_bank, amount, transaction_type, counterparty_name "
-                       "FROM transactions ORDER BY id"),
+                       "FROM transactions ORDER BY transaction_type"),
             [
                 {"source_bank": "FIO", "amount": -1234, "transaction_type": "CARD_TRANSACTION",
                  "counterparty_name": "Shop"},
@@ -84,8 +95,8 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
             tb_row(amount="1000", currency="JPY"),
         ])
         self.run_import()
-        rows = self.query("SELECT amount, typeof(amount) AS t FROM transactions ORDER BY id")
-        self.assertEqual(rows, [{"amount": 123456, "t": "integer"}, {"amount": 1000, "t": "integer"}])
+        rows = self.query("SELECT amount, typeof(amount) AS t FROM transactions ORDER BY amount")
+        self.assertEqual(rows, [{"amount": 1000, "t": "integer"}, {"amount": 123456, "t": "integer"}])
 
     def test_windows_1250_characters_survive(self):
         """Verify Windows-1250 encoded diacritics are accurately preserved."""
@@ -93,16 +104,6 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
         self.write_tb("tb.csv", [tb_row(description=text)])
         self.run_import()
         self.assertEqual(self.query("SELECT description FROM transactions")[0]["description"], text)
-
-    def test_import_log_records_hash_bank_and_row_count(self):
-        """Verify import log tracks SHA-256 hash, bank name, and imported row count."""
-        path = self.write_tb("tb.csv", [tb_row(), tb_row()])
-        self.run_import()
-        entry = self.import_log()[0]
-        self.assertEqual(entry["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
-        self.assertEqual((entry["filename"], entry["source_bank"], entry["rows_imported"]),
-                         ("tb.csv", "TB", 2))
-        self.assertTrue(entry["imported_at"])
 
     # ------------------------------------------------------------------ file selection
 
@@ -133,7 +134,8 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
     def test_blank_rows_are_skipped(self):
         """Verify completely empty or blank CSV rows are skipped during import."""
         blank_cells = [""] * len(TB_HEADERS)
-        self.write_tb("tb.csv", [tb_row(), blank_cells, [], tb_row()])
+        self.write_tb("tb.csv", [tb_row(description="one"), blank_cells, [],
+                                 tb_row(description="two")])
         self.assertEqual(self.run_import()[0].rows_imported, 2)
         self.assertEqual(self.count_transactions(), 2)
 
@@ -146,7 +148,7 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
 
     def test_second_run_skips_files_already_imported(self):
         """Verify that re-running import on previously imported files skips them."""
-        self.write_tb("tb.csv", [tb_row(), tb_row()])
+        self.write_tb("tb.csv", [tb_row(description="one"), tb_row(description="two")])
         self.run_import()
         second = self.run_import()
         self.assertEqual(second, [ImportResult("tb.csv", "TB", 0, skipped=True)])
@@ -178,17 +180,13 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
             ["first", "overlap", "new"],
         )
 
-    def test_overlapping_export_preserves_repeated_row_occurrences(self):
-        """Keep repeated identical transactions up to their count in the new CSV."""
+    def test_identical_rows_in_one_file_fail_as_ambiguous(self):
+        """Reject duplicate rows within one file because stable IDs cannot distinguish them."""
         repeated = tb_row(description="same transaction details")
-        self.write_tb("a.csv", [repeated])
-        self.run_import()
-        self.write_tb("b.csv", [repeated, repeated])
-
-        result = self.run_import()[1]
-
-        self.assertEqual(result.rows_imported, 1)
-        self.assertEqual(self.count_transactions(), 2)
+        self.write_tb("duplicates.csv", [repeated, repeated])
+        with self.assertRaisesRegex(ValueError, "identical transactions within one CSV"):
+            self.run_import()
+        self.assertEqual(self.count_transactions(), 0)
 
     def test_rows_that_differ_in_a_transaction_field_are_not_deduplicated(self):
         """Retain transactions with otherwise matching fields but different amounts."""
@@ -199,7 +197,7 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
 
         self.assertEqual([result.rows_imported for result in results], [1, 1])
         self.assertEqual(
-            [row["amount"] for row in self.query("SELECT amount FROM transactions ORDER BY id")],
+            [row["amount"] for row in self.query("SELECT amount FROM transactions ORDER BY amount")],
             [1000, 1100],
         )
 
@@ -207,11 +205,11 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
 
     def test_bad_row_rolls_back_the_whole_file_and_reports_file_and_row(self):
         """Verify that an invalid row rolls back the entire file and logs no entries."""
-        self.write_tb("bad.csv", [tb_row(), tb_row(), tb_row(amount="abc")])
+        self.write_tb("bad.csv", [tb_row(description="one"), tb_row(description="two"),
+                                  tb_row(amount="abc")])
         with self.assertRaisesRegex(ValueError, r"bad\.csv, row 4: Invalid amount"):
             self.run_import()
         self.assertEqual(self.count_transactions(), 0)
-        self.assertEqual(self.import_log(), [])
 
     def test_file_is_importable_once_fixed(self):
         """Verify that a corrected file can be imported successfully after prior failure."""
@@ -223,19 +221,17 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
 
     def test_files_imported_before_a_failure_are_kept(self):
         """Verify that files committed prior to a subsequent file error remain saved."""
-        self.write_tb("a_good.csv", [tb_row(), tb_row()])
+        self.write_tb("a_good.csv", [tb_row(description="one"), tb_row(description="two")])
         self.write_tb("b_bad.csv", [tb_row(amount="abc")])
         with self.assertRaises(ValueError):
             self.run_import()
         self.assertEqual(self.count_transactions(), 2)
-        self.assertEqual([entry["filename"] for entry in self.import_log()], ["a_good.csv"])
 
     def test_unrecognized_file_fails_and_names_the_file(self):
         """Verify that an unrecognized CSV file raises an error naming the file."""
         (self.csv_dir / "weird.csv").write_text("a,b,c\n1,2,3\n")
         with self.assertRaisesRegex(ValueError, r"weird\.csv.*unrecognized"):
             self.run_import()
-        self.assertEqual(self.import_log(), [])
 
     def test_missing_required_value_fails(self):
         """Verify that a row missing a required value raises a validation error."""
@@ -269,8 +265,8 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
             tb_row(tx_type="Debet", vs="55", payer_reference="/VS0055/SS/KS"),
         ])
         self.run_import()
-        rows = self.query(f"SELECT {SYMBOL_COLUMNS} FROM transactions ORDER BY id")
-        self.assertEqual(
+        rows = self.query(f"SELECT {SYMBOL_COLUMNS} FROM transactions")
+        self.assertCountEqual(
             [(r["variable_symbol"], r["specific_symbol"], r["constant_symbol"], r["payer_reference"])
              for r in rows],
             [

@@ -1,9 +1,8 @@
-"""Shared helpers for the test suite: import path setup, CSV builders and a DB-backed TestCase."""
+"""Synthetic CSV builders and temporary-database fixtures for the tests."""
 
 import csv
 import io
 import sqlite3
-import sys
 import tempfile
 import unittest
 from collections import defaultdict
@@ -11,11 +10,6 @@ from contextlib import closing
 from pathlib import Path
 
 from src.database import create_transactions_table
-
-SRC_DIR = Path(__file__).resolve().parent.parent / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
 from src.importer import TB_HEADERS, import_csv_files, FIO_HEADERS
 
 
@@ -159,7 +153,7 @@ class BaseDatabaseTestCase(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.temp_dir = Path(temp.name)
-        self.db_path = self.temp_dir / "banking.db"
+        self.db_path = self.temp_dir / "transactions.db"
         self.csv_dir = self.temp_dir / "imports"
         self.csv_dir.mkdir()
         create_transactions_table(self.db_path)

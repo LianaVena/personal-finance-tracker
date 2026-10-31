@@ -1,6 +1,7 @@
 """Tests for CSV file importing, duplicate detection, failure handling, and symbol extraction."""
 
 import unittest
+from unittest.mock import patch
 
 from src.importer import ImportResult, import_csv_files, TB_HEADERS
 from tests.support import (
@@ -187,6 +188,16 @@ class ImportCsvFilesTests(BaseDatabaseTestCase):
         with self.assertRaisesRegex(ValueError, "identical transactions within one CSV"):
             self.run_import()
         self.assertEqual(self.count_transactions(), 0)
+
+    def test_hash_collision_preserves_original_row_and_rolls_back_new_file(self):
+        """Reject different contents sharing an ID without overwriting an earlier import."""
+        self.write_tb("a.csv", [tb_row(amount="10,00", description="Original")])
+        self.write_tb("b.csv", [tb_row(amount="20,00", description="Different")])
+        with patch("src.importer.generate_transaction_id", return_value="a" * 64):
+            with self.assertRaisesRegex(ValueError, "b.csv, row 2: transaction ID collision"):
+                self.run_import()
+        self.assertEqual(self.query("SELECT amount, description FROM transactions"),
+                         [{"amount": 1000, "description": "Original"}])
 
     def test_rows_that_differ_in_a_transaction_field_are_not_deduplicated(self):
         """Retain transactions with otherwise matching fields but different amounts."""

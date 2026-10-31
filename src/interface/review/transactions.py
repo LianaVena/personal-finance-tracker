@@ -48,6 +48,9 @@ def review_transactions(transaction_db_path: Path, finance_db_path: Path) -> lis
     Returns:
         Transactions ordered newest first with their metadata, splits, and
         outstanding review reasons.
+
+    Raises:
+        RuntimeError: The transaction query returns no column metadata.
     """
     with closing(connect_database(transaction_db_path)) as connection:
         cursor = connection.execute("SELECT * FROM transactions ORDER BY booking_date DESC, id DESC")

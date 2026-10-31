@@ -9,8 +9,11 @@ from typing import TYPE_CHECKING
 from nicegui import ui
 
 from src.database import connect_database
+from src.subcategory_colors import DEFAULT_SUBCATEGORY_COLOR, normalize_subcategory_color
 from .models import ManagementData
+from ..color_grid import SubcategoryColorGrid
 from ..common import currency_options as _currency_options, money_to_minor_units as _money_to_minor_units
+from ..common import notify as _notify
 from ..context import RULE_FIELDS
 from ..review.create import create_counterparty as _create_counterparty, create_subscription as _create_subscription
 
@@ -41,44 +44,52 @@ def render_create_form(page: ManagePage, data: ManagementData, entity_kind: str)
             """Validate and create the category currently in the form."""
             name = (name_input.value or "").strip()
             if not name:
-                ui.notify("Enter a category name", type="warning")
+                _notify(ui, "Enter a category name", type="warning")
                 return
             try:
                 with closing(connect_database(page.finance_db_path)) as connection, connection:
                     connection.execute("INSERT INTO categories(name) VALUES (?)", (name,))
-                ui.notify("Category created", type="positive")
+                _notify(ui, "Category created", type="positive")
                 page.drafts.pop((entity_kind, None), None)
                 page.render_management()
                 page.actions.render_configuration()
             except sqlite3.IntegrityError:
-                ui.notify("A category with that name already exists", type="warning")
+                _notify(ui, "A category with that name already exists", type="warning")
     elif entity_kind == "subcategory":
-        draft = page.management_draft(entity_kind, None, {"parent": None, "name": ""})
-        with ui.row().classes("w-full items-end gap-2 flex-nowrap"):
+        draft = page.management_draft(entity_kind, None, {
+            "parent": None, "name": "", "color": DEFAULT_SUBCATEGORY_COLOR,
+        })
+        with ui.row().classes("w-full items-center gap-2 flex-nowrap"):
             parent = ui.select(data.categories, value=draft["parent"],
                                label="Parent category").classes("flex-1 min-w-0")
             name_input = ui.input("Subcategory name", value=draft["name"]).classes("flex-1 min-w-0")
             page.bind_management_draft(draft, "parent", parent)
             page.bind_management_draft(draft, "name", name_input)
+            color = SubcategoryColorGrid(
+                draft["color"], lambda value: draft.__setitem__("color", value), data.colors,
+            )
             ui.button(icon="add", on_click=lambda: save()).props("round outline").tooltip(create_title)
 
         def save():
             """Validate and create the subcategory currently in the form."""
             name = (name_input.value or "").strip()
             if parent.value is None or not name:
-                ui.notify("Choose a category and enter a subcategory name", type="warning")
+                _notify(ui, "Choose a category and enter a subcategory name", type="warning")
                 return
             try:
+                selected_color = normalize_subcategory_color(color.value, data.colors)
                 with closing(connect_database(page.finance_db_path)) as connection, connection:
-                    connection.execute("INSERT INTO subcategories(category_id, name) VALUES (?, ?)",
-                                       (parent.value, name))
-                ui.notify("Subcategory created", type="positive")
+                    connection.execute("INSERT INTO subcategories(category_id, name, color_id) VALUES (?, ?, ?)",
+                                       (parent.value, name, selected_color))
+                _notify(ui, "Subcategory created", type="positive")
                 page.drafts.pop((entity_kind, None), None)
                 page.render_management()
                 page.actions.render_configuration()
                 page.actions.render_transactions()
             except sqlite3.IntegrityError:
-                ui.notify("That subcategory already exists in this category", type="warning")
+                _notify(ui, "That subcategory already exists in this category", type="warning")
+            except ValueError as error:
+                _notify(ui, str(error), type="warning")
     elif entity_kind == "counterparty":
         draft = page.management_draft(entity_kind, None, {"name": "", "subcategory": None, "subscription": None,
                                                           "source": "payment_message", "pattern": ""})
@@ -108,15 +119,15 @@ def render_create_form(page: ManagePage, data: ManagementData, entity_kind: str)
             try:
                 _create_counterparty(page.finance_db_path, name_input.value or "", subcategory.value,
                                      default_subscription.value, source.value, pattern.value or "")
-                ui.notify("Counterparty and matching rule created" if (pattern.value or "").strip()
-                          else "Counterparty created", type="positive")
+                _notify(ui, "Counterparty and matching rule created" if (pattern.value or "").strip()
+                else "Counterparty created", type="positive")
                 page.drafts.pop((entity_kind, None), None)
                 page.actions.refresh_matching()
                 page.render_management()
                 page.actions.render_configuration()
                 page.actions.render_transactions()
             except (sqlite3.Error, ValueError) as error:
-                ui.notify(str(error), type="warning")
+                _notify(ui, str(error), type="warning")
     else:
         draft = page.management_draft(entity_kind, None, {"name": "", "counterparty": None, "period": "monthly",
                                                           "amount": "", "currency": "EUR",
@@ -159,8 +170,8 @@ def render_create_form(page: ManagePage, data: ManagementData, entity_kind: str)
                                      period.value, amount, currency_value,
                                      (source.value, pattern.value or "") if (pattern.value or "").strip()
                                      else None)
-                ui.notify("Subscription and matching rule created" if (pattern.value or "").strip()
-                          else "Subscription created", type="positive")
+                _notify(ui, "Subscription and matching rule created" if (pattern.value or "").strip()
+                else "Subscription created", type="positive")
                 page.drafts.pop((entity_kind, None), None)
                 page.actions.refresh_matching()
                 page.render_management()
@@ -168,4 +179,4 @@ def render_create_form(page: ManagePage, data: ManagementData, entity_kind: str)
                 page.actions.render_transactions()
                 page.actions.render_subscriptions()
             except (sqlite3.Error, ValueError) as error:
-                ui.notify(str(error), type="warning")
+                _notify(ui, str(error), type="warning")

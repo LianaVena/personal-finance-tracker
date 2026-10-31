@@ -10,8 +10,11 @@ from typing import TYPE_CHECKING
 from nicegui import ui
 
 from src.database import connect_database
+from src.subcategory_colors import normalize_subcategory_color
 from .models import ManagementData
+from ..color_grid import SubcategoryColorGrid
 from ..common import currency_options as _currency_options, money_to_minor_units as _money_to_minor_units
+from ..common import notify as _notify
 
 if TYPE_CHECKING:
     from .page import ManagePage
@@ -40,26 +43,31 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
             """Validate and persist the selected category's new name."""
             name = (name_input.value or "").strip()
             if not name:
-                ui.notify("Category name cannot be empty", type="warning")
+                _notify(ui, "Category name cannot be empty", type="warning")
                 return
             try:
                 with closing(connect_database(page.finance_db_path)) as connection, connection:
                     connection.execute("UPDATE categories SET name = ? WHERE id = ?", (name, item_id))
-                ui.notify("Category updated", type="positive")
+                _notify(ui, "Category updated", type="positive")
                 draft["name"] = name
                 page.render_management()
                 page.actions.render_configuration()
             except sqlite3.IntegrityError:
-                ui.notify("A category with that name already exists", type="warning")
+                _notify(ui, "A category with that name already exists", type="warning")
     elif entity_kind == "subcategory":
         item = next(candidate for candidate in data.subcategories if candidate[0] == item_id)
-        draft = page.management_draft(entity_kind, item_id, {"parent": item[1], "name": item[2]})
-        with ui.row().classes("w-full items-end gap-2 flex-nowrap"):
+        draft = page.management_draft(entity_kind, item_id, {
+            "parent": item[1], "name": item[2], "color": item[4],
+        })
+        with ui.row().classes("w-full items-center gap-2 flex-nowrap"):
             parent = ui.select(data.categories, value=draft["parent"],
                                label="Category").classes("flex-1 min-w-0")
             name_input = ui.input("Subcategory name", value=draft["name"]).classes("flex-1 min-w-0")
             page.bind_management_draft(draft, "parent", parent)
             page.bind_management_draft(draft, "name", name_input)
+            color = SubcategoryColorGrid(
+                draft["color"], lambda value: draft.__setitem__("color", value), data.colors,
+            )
             ui.button(icon="save", on_click=lambda: save()).props("round outline").tooltip(
                 f"Save {entity_kind}")
 
@@ -67,19 +75,23 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
             """Validate and persist the selected subcategory's changes."""
             name = (name_input.value or "").strip()
             if parent.value is None or not name:
-                ui.notify("Choose a category and enter a subcategory name", type="warning")
+                _notify(ui, "Choose a category and enter a subcategory name", type="warning")
                 return
             try:
+                selected_color = normalize_subcategory_color(color.value, data.colors)
                 with closing(connect_database(page.finance_db_path)) as connection, connection:
-                    connection.execute("UPDATE subcategories SET category_id = ?, name = ? WHERE id = ?",
-                                       (parent.value, name, item_id))
-                ui.notify("Subcategory updated", type="positive")
-                draft.update(parent=parent.value, name=name)
+                    connection.execute("UPDATE subcategories SET category_id = ?, name = ?, color_id = ? WHERE id = ?",
+                                       (parent.value, name, selected_color, item_id))
+                _notify(ui, "Subcategory updated", type="positive")
+                draft.update(parent=parent.value, name=name, color=selected_color)
                 page.render_management()
                 page.actions.render_configuration()
                 page.actions.render_transactions()
+                page.actions.render_subscriptions()
             except sqlite3.IntegrityError:
-                ui.notify("That subcategory already exists in this category", type="warning")
+                _notify(ui, "That subcategory already exists in this category", type="warning")
+            except ValueError as error:
+                _notify(ui, str(error), type="warning")
     elif entity_kind == "counterparty":
         item = next(candidate for candidate in data.counterparties if candidate["id"] == item_id)
         draft = page.management_draft(entity_kind, item_id, {"name": item["name"],
@@ -102,14 +114,14 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
             """Persist the selected counterparty's name and defaults."""
             name = (name_input.value or "").strip()
             if not name:
-                ui.notify("Counterparty name cannot be empty", type="warning")
+                _notify(ui, "Counterparty name cannot be empty", type="warning")
                 return
             try:
                 with closing(connect_database(page.finance_db_path)) as connection, connection:
                     connection.execute("UPDATE counterparties SET name = ?, default_subcategory_id = ?, "
                                        "default_is_subscription = ? WHERE id = ?",
                                        (name, subcategory.value, subscription.value, item_id))
-                ui.notify("Counterparty updated", type="positive")
+                _notify(ui, "Counterparty updated", type="positive")
                 draft.update(name=name, subcategory=subcategory.value,
                              subscription=subscription.value)
                 page.actions.refresh_matching()
@@ -117,7 +129,7 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
                 page.actions.render_configuration()
                 page.actions.render_transactions()
             except sqlite3.IntegrityError:
-                ui.notify("A counterparty with that name already exists", type="warning")
+                _notify(ui, "A counterparty with that name already exists", type="warning")
     else:
         item = next(candidate for candidate in data.subscriptions if candidate["id"] == item_id)
         draft = page.management_draft(entity_kind, item_id, {
@@ -153,7 +165,7 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
             """Validate and persist the selected subscription's fields."""
             name = (name_input.value or "").strip()
             if not name:
-                ui.notify("Subscription name cannot be empty", type="warning")
+                _notify(ui, "Subscription name cannot be empty", type="warning")
                 return
             try:
                 amount = _money_to_minor_units(amount_input.value)
@@ -170,7 +182,7 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
                                        (name, counterparty_input.value, period.value, amount,
                                         currency_value or None,
                                         int(bool(active.value)), item_id))
-                ui.notify("Subscription updated", type="positive")
+                _notify(ui, "Subscription updated", type="positive")
                 draft.update(name=name, counterparty=counterparty_input.value, period=period.value,
                              amount=amount_input.value, currency=currency.value, active=active.value)
                 page.actions.refresh_matching()
@@ -179,9 +191,9 @@ def render_edit_form(page: ManagePage, data: ManagementData, entity_kind: str, i
                 page.actions.render_transactions()
                 page.actions.render_subscriptions()
             except sqlite3.IntegrityError:
-                ui.notify("A subscription with that name already exists", type="warning")
+                _notify(ui, "A subscription with that name already exists", type="warning")
             except (sqlite3.Error, ValueError) as error:
-                ui.notify(str(error), type="warning")
+                _notify(ui, str(error), type="warning")
     if entity_kind == "counterparty":
         page.render_management_rules("counterparties_match_rules", "counterparty_id", item_id)
     elif entity_kind == "subscription":

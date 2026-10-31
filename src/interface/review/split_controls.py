@@ -12,6 +12,7 @@ from .transactions import save_excluded as _save_excluded, save_split_amount as 
     save_split_note as _save_split_note, save_subcategory as _save_subcategory, \
     save_subscription_decision as _save_subscription_decision
 from ..common import money_to_minor_units as _money_to_minor_units
+from ..common import notify as _notify
 
 if TYPE_CHECKING:
     from .page import ReviewPage
@@ -58,7 +59,7 @@ def render_split_decisions(page: ReviewPage, subscription_options: dict, split_r
                 )
                 page.refresh_after_edit(tid)
             except sqlite3.Error as error:
-                ui.notify(f"Could not save subscription status: {error}", type="negative")
+                _notify(ui, f"Could not save subscription status: {error}", type="negative")
 
         def save_subscription(event, split_id=split_record["id"], tid=transaction_id,
                               status_select=decision_select):
@@ -75,7 +76,7 @@ def render_split_decisions(page: ReviewPage, subscription_options: dict, split_r
                 status_select.value = "yes"
                 page.refresh_after_edit(tid)
             except sqlite3.Error as error:
-                ui.notify(f"Could not link subscription: {error}", type="negative")
+                _notify(ui, f"Could not link subscription: {error}", type="negative")
 
         decision_select.on_value_change(save_decision)
         if subscription_select is not None:
@@ -84,7 +85,16 @@ def render_split_decisions(page: ReviewPage, subscription_options: dict, split_r
 
 def render_split_editor(page: ReviewPage, transaction: dict, split: dict, splits: list[dict],
                         subcategory_options: dict, subscription_options: dict) -> None:
-    """Render one expanded split while capturing its IDs in callbacks."""
+    """Render one expanded split while capturing its IDs in callbacks.
+
+    Args:
+        page: Review controller supplying database paths and refresh operations.
+        transaction: Parent transaction containing the split.
+        split: Split record to edit.
+        splits: All splits belonging to the transaction.
+        subcategory_options: Available subcategory IDs and display labels.
+        subscription_options: Available subscription IDs and display labels.
+    """
     tx_id = transaction["id"]
     with ui.card().classes("w-full p-3 shadow-none border border-slate-700"):
         split_note = ui.input(
@@ -102,7 +112,7 @@ def render_split_editor(page: ReviewPage, transaction: dict, split: dict, splits
                 _save_split_note(page.finance_db_path, split_id,
                                  (event.value or "").strip() or None)
             except sqlite3.Error as error:
-                ui.notify(f"Could not save split note: {error}", type="negative")
+                _notify(ui, f"Could not save split note: {error}", type="negative")
 
         split_note.on_value_change(save_split_note)
 
@@ -132,7 +142,7 @@ def render_split_editor(page: ReviewPage, transaction: dict, split: dict, splits
                         raise ValueError("Every split must have the transaction's sign")
                     _save_split_amount(page.finance_db_path, split_id, cents)
                 except (sqlite3.Error, ValueError) as error:
-                    ui.notify(str(error), type="warning")
+                    _notify(ui, str(error), type="warning")
 
             def save_exclusion(event, split_id=split["id"], tid=tx_id):
                 """Save this split's exclusion flag.
@@ -160,7 +170,7 @@ def render_split_editor(page: ReviewPage, transaction: dict, split: dict, splits
                     page.refresh_matching()
                     page.refresh_after_edit(tid)
                 except sqlite3.Error as error:
-                    ui.notify(f"Could not save subcategory: {error}", type="negative")
+                    _notify(ui, f"Could not save subcategory: {error}", type="negative")
 
             category_select.on_value_change(save_split_category)
 

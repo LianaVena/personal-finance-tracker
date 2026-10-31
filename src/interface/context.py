@@ -28,14 +28,34 @@ RULE_FIELDS = {
 class UiActions(Protocol):
     """Describe the cross-page operations supplied by the application."""
 
-    def refresh_matching(self, advance_if_complete: bool = False) -> None: ...
+    def refresh_matching(self, advance_if_complete: bool = False) -> None:
+        """Reapply matching rules while retaining the review position.
 
-    def refresh_after_edit(self, transaction_id: str) -> None: ...
+        Args:
+            advance_if_complete: Whether a newly completed transaction may leave review.
+        """
+        ...
 
-    def render_transactions(self) -> None: ...
+    def refresh_after_edit(self, transaction_id: str) -> None:
+        """Refresh review while keeping an edited transaction visible.
 
-    def render_configuration(self) -> None: ...
+        Args:
+            transaction_id: Stable ID of the edited transaction.
+        """
+        ...
 
-    def render_management(self) -> None: ...
+    def render_transactions(self) -> None:
+        """Redraw the current transaction review controls."""
+        ...
 
-    def render_subscriptions(self) -> None: ...
+    def render_configuration(self) -> None:
+        """Redraw the Review page's entity creation forms."""
+        ...
+
+    def render_management(self) -> None:
+        """Redraw management tables and forms."""
+        ...
+
+    def render_subscriptions(self) -> None:
+        """Redraw subscription totals and tables."""
+        ...

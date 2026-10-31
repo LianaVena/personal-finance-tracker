@@ -10,8 +10,9 @@ from pathlib import Path
 from nicegui import ui
 
 from src.database import connect_database
-from .queries import subscription_categories as _subscription_categories
+from .queries import subscription_category_details as _subscription_category_details
 from ..common import format_money as _format_money
+from ..common import notify as _notify
 from ..context import UiActions
 from ..manage.tables import subscriptions as _subscriptions
 
@@ -21,6 +22,14 @@ class SubscriptionsPage:
 
     def __init__(self, transaction_db_path: Path, finance_db_path: Path,
                  actions: UiActions, content: ui.column) -> None:
+        """Initialize the subscription controller without loading data.
+
+        Args:
+            transaction_db_path: Database containing payment booking dates.
+            finance_db_path: Database containing subscriptions and split classifications.
+            actions: Cross-page refresh operations supplied by the coordinator.
+            content: Container for subscription totals and tables.
+        """
         self.transaction_db_path = transaction_db_path
         self.finance_db_path = finance_db_path
         self.actions = actions
@@ -30,7 +39,7 @@ class SubscriptionsPage:
         """Render active and inactive subscriptions with their totals."""
         self.content.clear()
         subscriptions = _subscriptions(self.finance_db_path)
-        categories_by_subscription = _subscription_categories(self.transaction_db_path, self.finance_db_path)
+        categories_by_subscription = _subscription_category_details(self.transaction_db_path, self.finance_db_path)
         columns = [
             {"name": "name", "label": "Name", "field": "name", "sortable": True, "align": "left",
              "style": "width: 20%; white-space: normal;", "headerStyle": "width: 20%; white-space: normal;"},
@@ -79,7 +88,8 @@ class SubscriptionsPage:
                             "name": subscription["name"],
                             "is_active": bool(subscription["is_active"]),
                             "billing_period": subscription["billing_period"].capitalize(),
-                            "category": categories_by_subscription.get(subscription["id"], "—"),
+                            "category": categories_by_subscription.get(subscription["id"], ("—", None))[0],
+                            "color": categories_by_subscription.get(subscription["id"], ("—", None))[1],
                             "monthly_amount": monthly_display,
                             "yearly_amount": yearly_display,
                             "monthly_calculated": amount is not None
@@ -122,11 +132,18 @@ class SubscriptionsPage:
                         table = ui.table(columns=columns, rows=rows, row_key="id").props(
                             'table-style="table-layout: fixed; width: 100%"'
                         ).classes("w-full min-w-0")
+                        table.add_slot("body-cell", """
+                            <q-td :props="props" :style="props.row.color
+                                ? {backgroundColor: props.row.color, color: 'white'} : {}">
+                                {{ props.value }}
+                            </q-td>
+                        """)
                         table.add_slot("body-cell-monthly_amount", """
-                            <q-td :props="props">
+                            <q-td :props="props" :style="props.row.color
+                                ? {backgroundColor: props.row.color, color: 'white'} : {}">
                                 <div class="row items-center justify-end no-wrap q-gutter-xs">
                                     <span v-if="props.row.monthly_calculated"
-                                        class="text-xs font-semibold text-grey-6">
+                                        class="text-xs font-semibold" style="opacity: 0.7">
                                         fx
                                         <q-tooltip>Calculated equivalent</q-tooltip>
                                     </span>
@@ -135,10 +152,11 @@ class SubscriptionsPage:
                             </q-td>
                         """)
                         table.add_slot("body-cell-yearly_amount", """
-                            <q-td :props="props">
+                            <q-td :props="props" :style="props.row.color
+                                ? {backgroundColor: props.row.color, color: 'white'} : {}">
                                 <div class="row items-center justify-end no-wrap q-gutter-xs">
                                     <span v-if="props.row.yearly_calculated"
-                                        class="text-xs font-semibold text-grey-6">
+                                        class="text-xs font-semibold" style="opacity: 0.7">
                                         fx
                                         <q-tooltip>Calculated equivalent</q-tooltip>
                                     </span>
@@ -147,7 +165,8 @@ class SubscriptionsPage:
                             </q-td>
                         """)
                         table.add_slot("body-cell-is_active", """
-                            <q-td :props="props" class="text-right">
+                            <q-td :props="props" class="text-right" :style="props.row.color
+                                ? {backgroundColor: props.row.color, color: 'white'} : {}">
                                 <q-checkbox :model-value="props.row.is_active"
                                     @update:model-value="$parent.$emit('active_change', props.row.id, $event)" />
                             </q-td>
@@ -165,11 +184,11 @@ class SubscriptionsPage:
                                 with closing(connect_database(self.finance_db_path)) as connection, connection:
                                     connection.execute("UPDATE subscriptions SET is_active = ? WHERE id = ?",
                                                        (int(bool(active_value)), int(subscription_id)))
-                                ui.notify("Subscription activated" if active_value else "Subscription inactivated",
-                                          type="positive")
+                                _notify(ui, "Subscription activated" if active_value else "Subscription inactivated",
+                                        type="positive")
                                 self.render_subscriptions()
                                 self.actions.render_management()
                             except (sqlite3.Error, TypeError, ValueError) as error:
-                                ui.notify(f"Could not update subscription status: {error}", type="negative")
+                                _notify(ui, f"Could not update subscription status: {error}", type="negative")
 
                         table.on("active_change", change_active)

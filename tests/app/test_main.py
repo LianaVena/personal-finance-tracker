@@ -3,6 +3,7 @@
 import contextlib
 import importlib
 import io
+import runpy
 import sys
 import tempfile
 import types
@@ -36,11 +37,13 @@ class MainTests(unittest.TestCase):
         self.main = importlib.import_module("src.main")
         self.addCleanup(lambda: sys.modules.pop("src.main", None))
 
-    def run_main(self, results):
+    def run_main(self, results, *, matched=0, inactivated=0):
         """Run startup with mocked database work and capture its output.
 
         Args:
             results: Synthetic import results returned by the mocked importer.
+            matched: Number of synthetic transactions updated by matching.
+            inactivated: Number of synthetic subscriptions marked inactive.
 
         Returns:
             Captured standard output and the mocked importer.
@@ -53,8 +56,8 @@ class MainTests(unittest.TestCase):
             "create_transactions_table": mock.Mock(),
             "create_finance_tables": mock.Mock(),
             "import_csv_files": importer,
-            "apply_matching_rules": mock.Mock(return_value=0),
-            "inactivate_stale_subscriptions": mock.Mock(return_value=0),
+            "apply_matching_rules": mock.Mock(return_value=matched),
+            "inactivate_stale_subscriptions": mock.Mock(return_value=inactivated),
             "build_ui": mock.Mock(),
         }), contextlib.redirect_stdout(output):
             self.main.main()
@@ -131,6 +134,28 @@ class MainTests(unittest.TestCase):
         _, importer = self.run_main([])
         importer.assert_called_once_with(self.transactions_path)
         self.ui.run.assert_called_once_with(host="127.0.0.1", port=8765, reload=False, show=True)
+
+    def test_reports_matching_and_stale_subscription_changes(self):
+        """Report nonzero matching and stale-subscription updates during startup."""
+        output, _ = self.run_main([], matched=2, inactivated=3)
+        self.assertIn("Automatically updated matching data for 2 transactions", output)
+        self.assertIn("Inactivated 3 stale subscription(s)", output)
+
+    def test_direct_script_execution_uses_packaged_imports_and_mocked_startup(self):
+        """Support IDE script execution without opening databases or starting a server."""
+        module_file = self.main.__file__
+        assert module_file is not None, "Main module has no source file"
+        with mock.patch("src.database.create_finance_tables") as finance, \
+                mock.patch("src.database.create_transactions_table"), \
+                mock.patch("src.importer.import_csv_files", return_value=[]), \
+                mock.patch("src.categorization.apply_matching_rules", return_value=0), \
+                mock.patch("src.categorization.inactivate_stale_subscriptions", return_value=0), \
+                mock.patch("src.interface.interface.build_ui") as build, \
+                mock.patch.object(sys, "path", sys.path.copy()):
+            runpy.run_path(module_file, run_name="__main__")
+        finance.assert_called_once()
+        build.assert_called_once()
+        self.ui.run.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -159,10 +159,8 @@ def make_record(**overrides):
     Returns:
         Dummy record mapping suitable for payer-reference symbol tests.
     """
-    record = {"payer_reference": None, "variable_symbol": None,
-              "specific_symbol": None, "constant_symbol": None}
-    record.update(overrides)
-    return record
+    return {"payer_reference": None, "variable_symbol": None,
+            "specific_symbol": None, "constant_symbol": None, **overrides}
 
 
 def moved(reference, **columns):
@@ -300,6 +298,19 @@ class ParseCsvTests(unittest.TestCase):
         wrong = tb_bytes([tb_row()]).decode("cp1250").encode("utf-8")
         with self.assertRaises(ValueError):
             _parse_csv(wrong, "tb.csv")
+
+
+class InvalidReferenceTypeTests(unittest.TestCase):
+    """Reject malformed reference and symbol types before importing a record."""
+
+    def test_reference_and_symbol_values_must_be_strings(self):
+        """Reject numeric references and numeric symbols instead of silently coercing them."""
+        for field in ("payer_reference", "variable_symbol", "specific_symbol", "constant_symbol"):
+            with self.subTest(field=field):
+                record: dict[str, object] = {"payer_reference": "/VS1/SS2/KS3", "variable_symbol": None,
+                                             "specific_symbol": None, "constant_symbol": None, field: 1}
+                with self.assertRaisesRegex(ValueError, field + " must be a string or None"):
+                    _move_symbols_from_payer_reference(record)
 
 
 if __name__ == "__main__":

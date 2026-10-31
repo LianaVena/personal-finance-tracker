@@ -11,10 +11,12 @@ from nicegui import ui
 
 from src.categorization import apply_matching_rules
 from src.database import connect_database
+from src.subcategory_colors import DEFAULT_SUBCATEGORY_COLOR
 from .creation_forms import render_creation_forms
 from .transaction_card import render_transaction_card
 from .transactions import add_split as _add_split, delete_split as _delete_split, \
     review_transactions as _review_transactions
+from ..common import notify as _notify
 from ..context import PAGE_SIZE, ReviewState, UiActions
 from ..manage.tables import counterparties as _counterparties, subcategories as _subcategories, \
     subscriptions as _subscriptions
@@ -25,6 +27,15 @@ class ReviewPage:
 
     def __init__(self, transaction_db_path: Path, finance_db_path: Path, actions: UiActions,
                  transaction_content: ui.column, creation_content: ui.column) -> None:
+        """Initialize review navigation and independent creation-form drafts.
+
+        Args:
+            transaction_db_path: Database containing imported transactions.
+            finance_db_path: Database containing review metadata and classifications.
+            actions: Cross-page refresh operations supplied by the coordinator.
+            transaction_content: Container for the current review transaction.
+            creation_content: Container for entity creation forms.
+        """
         self.transaction_db_path = transaction_db_path
         self.finance_db_path = finance_db_path
         self.actions = actions
@@ -37,6 +48,7 @@ class ReviewPage:
             "category_name": "",
             "subcategory_parent": None,
             "subcategory_name": "",
+            "subcategory_color": DEFAULT_SUBCATEGORY_COLOR,
             "counterparty_name": "",
             "counterparty_subcategory": None,
             "counterparty_subscription": None,
@@ -108,14 +120,14 @@ class ReviewPage:
             None,
         )
         if transaction is None:
-            ui.notify("Transaction is no longer available", type="negative")
+            _notify(ui, "Transaction is no longer available", type="negative")
             return
         if transaction["review_reasons"]:
-            ui.notify("Complete the required fields before saving: "
-                      + " · ".join(transaction["review_reasons"]), type="warning")
+            _notify(ui, "Complete the required fields before saving: "
+                    + " · ".join(transaction["review_reasons"]), type="warning")
             return
         self.state["pinned_id"] = None
-        ui.notify("Transaction saved", type="positive")
+        _notify(ui, "Transaction saved", type="positive")
         self.render_transactions()
 
     def render_transactions(self) -> None:
@@ -182,7 +194,7 @@ class ReviewPage:
             self.state["expanded_splits"].add(transaction_id)
             self.refresh_after_edit(transaction_id)
         except (sqlite3.Error, ValueError) as error:
-            ui.notify(str(error), type="warning")
+            _notify(ui, str(error), type="warning")
 
     def delete_split(self, transaction_id: str, split_id: int) -> None:
         """Delete the selected split and refresh the current transaction.
@@ -205,7 +217,7 @@ class ReviewPage:
                 self.state["expanded_splits"].discard(transaction_id)
             self.refresh_after_edit(transaction_id)
         except (sqlite3.Error, ValueError) as error:
-            ui.notify(str(error), type="warning")
+            _notify(ui, str(error), type="warning")
 
     def toggle_split_settings(self, transaction_id: str) -> None:
         """Show or hide the split editor for one transaction.
@@ -240,7 +252,7 @@ class ReviewPage:
                 target = min(candidates,
                              key=lambda candidate: (candidate["booking_date"], candidate["id"])) if candidates else None
             if target is None:
-                ui.notify("There are no more transactions in that direction", type="info")
+                _notify(ui, "There are no more transactions in that direction", type="info")
                 return
             self.state["pinned_id"] = None
             self.state["offset"] = review.index(target)

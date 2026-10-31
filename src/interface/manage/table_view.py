@@ -26,6 +26,16 @@ def render_management_table(page: ManagePage, kind: str, rows: list[dict], colum
         rows=rows, columns=columns, row_key="id", pagination=0,
         column_defaults={"align": "left"},
     ).props("dense hide-bottom").classes("manage-table w-full cursor-pointer")
+    if kind == "subcategory":
+        table.add_slot("body-cell-color", """
+            <q-td :props="props">
+                <div class="row items-center no-wrap q-gutter-sm">
+                    <span v-if="props.value" :style="{backgroundColor: props.value, width: '14px', height: '14px',
+                                   borderRadius: '50%', display: 'inline-block'}" aria-hidden="true"></span>
+                    <span>{{ props.row.color_name }}</span>
+                </div>
+            </q-td>
+        """)
     if kind == "subscription":
         table.add_slot("body-cell-name", """
             <q-td :props="props">

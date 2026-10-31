@@ -36,11 +36,15 @@ def initialize_database(db_path: str | Path, schema_name: str) -> None:
     """Initialize a database using the packaged SQL schema file.
 
     finance.db is persistent and is initialized only when new. Existing files
-    are checked for the exact v2 shape and are never migrated in place.
+    are checked for the current schema and are never migrated in place.
 
     Args:
         db_path: Filesystem path to the database to initialize.
         schema_name: Supported schema filename: ``transactions.sql`` or ``finance.sql``.
+
+    Raises:
+        ValueError: The requested schema filename is not supported.
+        RuntimeError: An existing finance database has an incompatible schema.
     """
     if schema_name not in {"transactions.sql", "finance.sql"}:
         raise ValueError(f"Unexpected schema: {schema_name!r}")
@@ -72,7 +76,7 @@ def create_transactions_table(db_path: str | Path) -> None:
 
 
 def create_finance_tables(db_path: str | Path) -> None:
-    """Create a new finance v2 database or accept an already-v2 database.
+    """Create a new finance database or accept the current schema.
 
     Older or unrelated nonempty databases are deliberately rejected: schema
     changes to persistent financial data require a separate data-preserving
@@ -80,6 +84,10 @@ def create_finance_tables(db_path: str | Path) -> None:
 
     Args:
         db_path: Filesystem path to the persistent finance database.
+
+    Raises:
+        RuntimeError: An existing database has an incompatible schema, including
+            a missing color lookup table or a subcategory color ID column.
     """
     path = Path(db_path)
     if not path.exists() or path.stat().st_size == 0:
@@ -88,7 +96,8 @@ def create_finance_tables(db_path: str | Path) -> None:
 
     expected_columns = {
         "categories": {"id", "name"},
-        "subcategories": {"id", "category_id", "name"},
+        "colors": {"id", "row_hex", "pie_hex", "name"},
+        "subcategories": {"id", "category_id", "name", "color_id"},
         "counterparties": {"id", "name", "default_subcategory_id", "default_is_subscription"},
         "counterparties_match_rules": {"id", "counterparty_id", "source_field", "pattern"},
         "subscriptions": {
@@ -117,13 +126,19 @@ def create_finance_tables(db_path: str | Path) -> None:
             }
             if actual_columns == expected_columns:
                 return
+            legacy_columns = {**expected_columns, "subcategories": {"id", "category_id", "name"}}
+            if actual_columns == legacy_columns:
+                raise RuntimeError(
+                    "Existing finance.db is missing subcategory colors. It was left unchanged; "
+                    "its schema must be updated separately before restarting."
+                )
             raise RuntimeError(
-                "Existing finance.db is not the expected v2 schema. It was left unchanged; "
+                "Existing finance.db is not the expected finance schema. It was left unchanged; "
                 "an explicit, data-preserving migration plan is required."
             )
         else:
             raise RuntimeError(
-                "Existing finance.db is not the expected v2 schema. It was left unchanged; "
+                "Existing finance.db is not the expected finance schema. It was left unchanged; "
                 "an explicit, data-preserving migration plan is required."
             )
     if initialize_empty:

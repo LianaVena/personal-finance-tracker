@@ -13,8 +13,8 @@ from .edit_forms import render_edit_form
 from .models import ManagementData
 from .rule_controls import render_management_rules, remove_rule
 from .table_view import render_management_table
-from .tables import categories as _categories, counterparties as _counterparties, subcategories as _subcategories, \
-    subscriptions as _subscriptions
+from .tables import categories as _categories, colors as _colors, counterparties as _counterparties, \
+    subcategories as _subcategories, subscriptions as _subscriptions
 from ..common import format_money as _format_money
 from ..context import UiActions
 
@@ -24,6 +24,14 @@ class ManagePage:
 
     def __init__(self, transaction_db_path: Path, finance_db_path: Path,
                  actions: UiActions, content: ui.column) -> None:
+        """Initialize management state without querying either database.
+
+        Args:
+            transaction_db_path: Database containing imported transactions.
+            finance_db_path: Database containing entities, classifications, and rules.
+            actions: Cross-page refresh operations supplied by the coordinator.
+            content: Container for management tables and forms.
+        """
         self.transaction_db_path = transaction_db_path
         self.finance_db_path = finance_db_path
         self.actions = actions
@@ -33,6 +41,8 @@ class ManagePage:
         }
         self.counterparty_page = {"value": 1}
         self.drafts: dict[tuple[str, int | None], dict] = {}
+        self.form_containers: dict[str, ui.card] = {}
+        self.management_data: ManagementData | None = None
 
     def management_draft(self, kind: str, item_id: int | None, defaults: dict) -> dict:
         """Return persistent form values for one selected management item.
@@ -43,7 +53,7 @@ class ManagePage:
             defaults: Initial field values used when no draft exists.
 
         Returns:
-            Mutable form values retained for this entity until the page redraws.
+            Mutable form values shared by subsequent redraws for this entity.
         """
         return self.drafts.setdefault((kind, item_id), defaults.copy())
 
@@ -70,7 +80,22 @@ class ManagePage:
             self.selection[key] = None
         if not was_selected:
             self.selection[kind] = row["id"]
-        self.render_management()
+        self.render_management_forms()
+
+    def render_management_forms(self) -> None:
+        """Refresh editors while keeping table elements and their scroll positions."""
+        data = self.management_data
+        if data is None:
+            return
+        for kind, container in self.form_containers.items():
+            container.clear()
+            with container:
+                selected_id = self.selection[kind]
+                exists = any(candidate["id"] == selected_id for candidate in data.rows_by_kind[kind])
+                if selected_id is not None and exists:
+                    render_edit_form(self, data, kind, selected_id)
+                else:
+                    render_create_form(self, data, kind)
 
     def change_counterparty_page(self, direction: int) -> None:
         """Page through the counterparty table in fixed-size groups.
@@ -88,19 +113,25 @@ class ManagePage:
     def render_management(self) -> None:
         """Render management tables alongside create or edit forms."""
         self.content.clear()
+        self.form_containers.clear()
         categories = _categories(self.finance_db_path)
         subcategory_options = _subcategories(self.finance_db_path)
         counterparties = _counterparties(self.finance_db_path)
         subscriptions = _subscriptions(self.finance_db_path)
+        color_rows = _colors(self.finance_db_path)
         with closing(connect_database(self.finance_db_path)) as management_connection:
-            subcategories: list[tuple[int, int, str, str]] = management_connection.execute(
-                "SELECT s.id, s.category_id, s.name, c.name "
+            subcategories: list[
+                tuple[int, int, str, str, int | None, str | None, str | None]] = management_connection.execute(
+                "SELECT s.id, s.category_id, s.name, c.name, s.color_id, colors.pie_hex, colors.name "
                 "FROM subcategories AS s JOIN categories AS c ON c.id = s.category_id "
+                "LEFT JOIN colors ON colors.id = s.color_id "
                 "ORDER BY s.name COLLATE NOCASE"
             ).fetchall()
         rows_by_kind = {
             "category": [{"id": key, "name": value} for key, value in categories.items()],
-            "subcategory": [{"id": row[0], "name": row[2], "category": row[3]} for row in subcategories],
+            "subcategory": [{"id": row[0], "name": row[2], "category": row[3], "color": row[5],
+                             "color_name": row[6] or "No color"}
+                            for row in subcategories],
             "counterparty": [],
             "subscription": [{"id": sub["id"], "name": sub["name"],
                               "counterparty": sub["counterparty_name"] or "",
@@ -124,7 +155,8 @@ class ManagePage:
         columns_by_kind = {
             "category": [{"name": "name", "label": "Category", "field": "name", "sortable": True}],
             "subcategory": [{"name": "name", "label": "Subcategory", "field": "name", "sortable": True},
-                            {"name": "category", "label": "Category", "field": "category", "sortable": True}],
+                            {"name": "category", "label": "Category", "field": "category", "sortable": True},
+                            {"name": "color", "label": "Color", "field": "color", "sortable": True}],
             "counterparty": [{"name": "name", "label": "Counterparty", "field": "name", "sortable": True},
                              {"name": "default_category", "label": "Default category",
                               "field": "default_category", "sortable": True},
@@ -148,7 +180,8 @@ class ManagePage:
         }
 
         data = ManagementData(categories, subcategory_options, counterparties, subscriptions,
-                              subcategories, rows_by_kind, columns_by_kind)
+                              subcategories, rows_by_kind, columns_by_kind, color_rows)
+        self.management_data = data
 
         with self.content:
             with ui.element("div").classes("w-full grid grid-cols-1 md:grid-cols-2 gap-4 items-start"):
@@ -185,22 +218,37 @@ class ManagePage:
                                 ui.label(title).classes("text-lg font-semibold")
                                 ui.label(str(len(rows))).classes("text-sm text-slate-400")
                         self.render_management_table(kind, rows, columns_by_kind[kind])
-                    with ui.card().classes("w-full p-4 gap-3 shadow-none border-0"):
-                        selected_id = self.selection[kind]
-                        exists = any(candidate["id"] == selected_id for candidate in rows_by_kind[kind])
-                        if selected_id is not None and exists:
-                            render_edit_form(self, data, kind, selected_id)
-                        else:
-                            render_create_form(self, data, kind)
+                    self.form_containers[kind] = ui.card().classes("w-full p-4 gap-3 shadow-none border-0")
+        self.render_management_forms()
 
     def render_management_table(self, kind: str, rows: list[dict], columns: list[dict]) -> dict | None:
-        """Render the table and return its selected record."""
+        """Render the table and return its selected record.
+
+        Args:
+            kind: Entity type represented by the table.
+            rows: Records displayed in the table.
+            columns: NiceGUI column definitions for the records.
+
+        Returns:
+            Selected record, or ``None`` if no displayed row is selected.
+        """
         return render_management_table(self, kind, rows, columns)
 
     def render_management_rules(self, table_name: str, owner_column: str, owner_id: int) -> None:
-        """Render the matching-rule editor for the selected record."""
+        """Render the matching-rule editor for the selected record.
+
+        Args:
+            table_name: Matching-rule table to query.
+            owner_column: Foreign-key column linking rules to their owner.
+            owner_id: ID of the entity whose rules are displayed.
+        """
         render_management_rules(self, table_name, owner_column, owner_id)
 
     def remove_rule(self, table_name: str, rule_id: int) -> None:
-        """Delete a matching rule and redraw affected pages."""
+        """Delete a matching rule and redraw affected pages.
+
+        Args:
+            table_name: Matching-rule table containing the rule.
+            rule_id: ID of the rule to delete.
+        """
         remove_rule(self, table_name, rule_id)

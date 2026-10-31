@@ -1,6 +1,19 @@
 """Shared formatting and parsing helpers for the interface pages."""
 
 from decimal import Decimal, InvalidOperation
+from typing import Any
+
+
+def notify(ui_client: Any, *args: Any, **kwargs: Any) -> None:
+    """Send a NiceGUI notification without inheriting its Literal false positive.
+
+    Args:
+        ui_client: NiceGUI UI object or compatible test double.
+        *args: Positional notification arguments forwarded to ``notify``.
+        **kwargs: Notification options forwarded unchanged.
+    """
+    ui_client.notify(*args, **kwargs)
+
 
 _CURRENCY_SYMBOLS = {
     "EUR": "€", "USD": "$", "GBP": "£", "JPY": "¥", "CNY": "¥",

@@ -15,10 +15,15 @@ from .styles import apply_styles
 
 
 def build_ui(transaction_db_path: Path, finance_db_path: Path) -> None:
-    """Build the Review, Subscriptions, and Manage tabs with isolated page state."""
+    """Build the Review, Subscriptions, and Manage tabs with isolated page state.
+
+    Args:
+        transaction_db_path: Database containing imported transactions.
+        finance_db_path: Database containing finance classifications and settings.
+    """
     apply_styles()
     ui.page_title("Personal Finance Tracker")
-    ui.colors(primary="#176b5b", secondary="#d8a24a", accent="#b4543b")
+    ui.colors(primary="#2563eb", secondary="#d8a24a", accent="#be123c")
     with ui.column().classes("w-full max-w-none mx-auto px-2 py-6 gap-5"):
         with ui.row().classes("w-full items-center justify-between flex-wrap gap-4"):
             with ui.tabs().classes("w-auto flex-none justify-start") as page_tabs:

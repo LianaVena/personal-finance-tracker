@@ -11,6 +11,7 @@ from .split_controls import render_split_decisions, render_split_editor
 from .transactions import format_transaction_field as _format_transaction_field, \
     save_counterparty as _save_counterparty, save_excluded as _save_excluded, save_subcategory as _save_subcategory, \
     save_transaction_note as _save_transaction_note
+from ..common import notify as _notify
 
 if TYPE_CHECKING:
     from .page import ReviewPage
@@ -18,7 +19,15 @@ if TYPE_CHECKING:
 
 def render_transaction_card(page: ReviewPage, transaction: dict, counterparty_options: dict,
                             subcategory_options: dict, subscription_options: dict) -> None:
-    """Render a transaction card and capture the IDs used by its controls."""
+    """Render a transaction card and capture the IDs used by its controls.
+
+    Args:
+        page: Review controller supplying state, database paths, and refresh operations.
+        transaction: Transaction details and split records to display.
+        counterparty_options: Available counterparty IDs and display labels.
+        subcategory_options: Available subcategory IDs and display labels.
+        subscription_options: Available subscription IDs and display labels.
+    """
     tx_id = transaction["id"]
     splits = transaction["splits"]
     expanded = tx_id in page.state["expanded_splits"]
@@ -55,7 +64,7 @@ def render_transaction_card(page: ReviewPage, transaction: dict, counterparty_op
                         page.refresh_matching()
                         page.refresh_after_edit(transaction_id)
                     except (sqlite3.Error, ValueError) as error:
-                        ui.notify(f"Could not save counterparty: {error}", type="negative")
+                        _notify(ui, f"Could not save counterparty: {error}", type="negative")
 
                 counterparty_select.on_value_change(update_counterparty)
 
@@ -74,7 +83,7 @@ def render_transaction_card(page: ReviewPage, transaction: dict, counterparty_op
                     page.finance_db_path, transaction_id, (event.value or "").strip() or None,
                 )
             except sqlite3.Error as error:
-                ui.notify(f"Could not save note: {error}", type="negative")
+                _notify(ui, f"Could not save note: {error}", type="negative")
 
         note_input.on_value_change(save_transaction_note)
 
@@ -101,7 +110,7 @@ def render_transaction_card(page: ReviewPage, transaction: dict, counterparty_op
                         page.refresh_matching()
                         page.refresh_after_edit(transaction_id)
                     except (sqlite3.Error, ValueError) as error:
-                        ui.notify(f"Could not save counterparty: {error}", type="negative")
+                        _notify(ui, f"Could not save counterparty: {error}", type="negative")
 
                 counterparty_select.on_value_change(update_counterparty)
 
@@ -118,7 +127,7 @@ def render_transaction_card(page: ReviewPage, transaction: dict, counterparty_op
                         page.refresh_matching()
                         page.refresh_after_edit(tid)
                     except sqlite3.Error as error:
-                        ui.notify(f"Could not save subcategory: {error}", type="negative")
+                        _notify(ui, f"Could not save subcategory: {error}", type="negative")
 
                 category_select.on_value_change(update_compact_category)
             render_split_decisions(page, subscription_options, splits[0], tx_id)

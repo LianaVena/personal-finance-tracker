@@ -4,6 +4,21 @@ from contextlib import closing
 from pathlib import Path
 
 from ...database import connect_database
+from ...subcategory_colors import sort_subcategory_colors
+
+
+def colors(finance_db_path: Path) -> list[tuple[int, str, str, str]]:
+    """Load available color rows and sort them for the picker.
+
+    Args:
+        finance_db_path: Path to the finance database containing the colors table.
+
+    Returns:
+        Color ID, row hex, pie hex, and name rows in hue order.
+    """
+    with closing(connect_database(finance_db_path)) as connection:
+        rows = connection.execute("SELECT id, row_hex, pie_hex, name FROM colors").fetchall()
+    return sort_subcategory_colors(rows)
 
 
 def categories(finance_db_path: Path) -> dict[int, str]:

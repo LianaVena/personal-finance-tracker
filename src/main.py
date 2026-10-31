@@ -13,12 +13,13 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nicegui import ui
+from nicegui import app, ui
 
 from src.database import create_transactions_table, create_finance_tables
 from src.importer import import_csv_files
 from src.categorization import apply_matching_rules, inactivate_stale_subscriptions
 from src.interface.interface import build_ui
+from src.interface.server_errors import install_disconnect_handler
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 TRANSACTIONS_DB_PATH = ROOT_DIR / "transactions.db"
@@ -50,6 +51,9 @@ def main():
         print(f"Inactivated {inactivated} stale subscription(s)")
 
     build_ui(TRANSACTIONS_DB_PATH, FINANCE_DB_PATH)
+
+    if sys.platform == "win32":
+        app.on_startup(install_disconnect_handler)
 
     try:
         ui.run(

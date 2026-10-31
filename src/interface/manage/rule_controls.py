@@ -9,6 +9,7 @@ from nicegui import ui
 
 from .edits import add_rule as _add_rule, delete_rule as _delete_rule, update_rule as _update_rule
 from .tables import rules as _rules
+from ..common import notify as _notify
 from ..context import RULE_FIELDS
 
 if TYPE_CHECKING:
@@ -43,12 +44,12 @@ def render_management_rules(page: ManagePage, table_name: str, owner_column: str
                     try:
                         _update_rule(page.finance_db_path, table_name, owner_column, owner_id,
                                      saved_rule_id, source_input.value, pattern_input.value or "")
-                        ui.notify("Matching rule updated", type="positive")
+                        _notify(ui, "Matching rule updated", type="positive")
                         page.actions.refresh_matching()
                         page.render_management()
                         page.actions.render_transactions()
                     except (sqlite3.Error, ValueError) as error:
-                        ui.notify(str(error), type="warning")
+                        _notify(ui, str(error), type="warning")
 
                 ui.button(icon="save", on_click=save_rule).props(
                     "round outline").tooltip("Save matching rule")
@@ -63,12 +64,12 @@ def render_management_rules(page: ManagePage, table_name: str, owner_column: str
                 try:
                     _add_rule(page.finance_db_path, table_name, owner_column, owner_id,
                               source.value, pattern.value or "")
-                    ui.notify("Matching rule created", type="positive")
+                    _notify(ui, "Matching rule created", type="positive")
                     page.actions.refresh_matching()
                     page.render_management()
                     page.actions.render_transactions()
                 except (sqlite3.Error, ValueError) as error:
-                    ui.notify(str(error), type="warning")
+                    _notify(ui, str(error), type="warning")
 
             ui.button(icon="add", on_click=add_matching_rule).props(
                 "round outline").tooltip("Add matching rule")
@@ -88,4 +89,4 @@ def remove_rule(page: ManagePage, table_name: str, rule_id: int) -> None:
         page.render_management()
         page.actions.render_transactions()
     except sqlite3.Error as error:
-        ui.notify(f"Could not remove rule: {error}", type="negative")
+        _notify(ui, f"Could not remove rule: {error}", type="negative")

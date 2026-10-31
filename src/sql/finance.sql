@@ -5,10 +5,20 @@ CREATE TABLE IF NOT EXISTS categories (
     name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(trim(name)) > 0)
 );
 
+CREATE TABLE IF NOT EXISTS colors (
+    id INTEGER PRIMARY KEY,
+    row_hex TEXT NOT NULL UNIQUE
+        CHECK (row_hex GLOB '#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]'),
+    pie_hex TEXT NOT NULL UNIQUE
+        CHECK (pie_hex GLOB '#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]'),
+    name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0)
+);
+
 CREATE TABLE IF NOT EXISTS subcategories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
     name TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(name)) > 0),
+    color_id INTEGER REFERENCES colors(id) ON DELETE RESTRICT DEFAULT NULL,
     UNIQUE (category_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id);

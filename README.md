@@ -64,12 +64,19 @@ For a transaction, you can:
 The category creation forms on the right create categories, subcategories, counterparties, and subscriptions without
 leaving the Review tab. New counterparties and subscriptions can include optional matching rules.
 
+Subcategories can be assigned a color from the colors stored in `finance.db`. The picker opens as a compact, named
+palette, and subcategories may also have no color. The palette is sorted by hue when the app starts. Colors are
+maintained in the database rather than defined as a fixed palette in the application code.
+
 ### Subscriptions
 
 Subscriptions are grouped into active and inactive tables. The tables show the latest payment's category and
 subcategory, billing period, expected amount, and active status. Monthly and yearly equivalents are displayed; an `fx`
 mark indicates a calculated equivalent. Active monthly and yearly totals are shown above the active table. The active
 checkbox can be changed directly in either table.
+
+Rows are tinted with the assigned subcategory color when the latest linked payment has one consistent color. The row
+background uses that color's `row_hex`; colors are omitted when the latest payment has mixed or unset subcategory colors.
 
 At startup, an active subscription is made inactive when its latest linked payment is more than one calendar billing
 period old. Subscriptions without a linked payment are left active. Inactive subscriptions remain eligible when matching
@@ -79,7 +86,8 @@ historical transactions.
 
 Manage provides tables and editors for categories, subcategories, counterparties, and subscriptions. Select a row to
 edit it; when no row is selected, the editor creates a new item. Counterparty and subscription matching rules can be
-added, edited, and removed here.
+added, edited, and removed here. Tables can be sorted by their sortable columns; the subcategory table includes its
+color and supports sorting by color. Subcategory colors can be selected or cleared in both create and edit forms.
 
 ## Automatic matching
 

@@ -17,17 +17,35 @@ class UiCoordinator:
     def __init__(self, transaction_db_path: Path, finance_db_path: Path,
                  transaction_content: ui.column, creation_content: ui.column,
                  management_content: ui.column, subscriptions_content: ui.column) -> None:
+        """Create page controllers and connect their refresh callbacks.
+
+        Args:
+            transaction_db_path: Database containing imported transactions.
+            finance_db_path: Database containing finance classifications and settings.
+            transaction_content: Container for the current review transaction.
+            creation_content: Container for Review entity creation forms.
+            management_content: Container for management tables and editors.
+            subscriptions_content: Container for subscription totals and tables.
+        """
         self.review = ReviewPage(transaction_db_path, finance_db_path, self,
                                  transaction_content, creation_content)
         self.manage = ManagePage(transaction_db_path, finance_db_path, self, management_content)
         self.subscriptions = SubscriptionsPage(transaction_db_path, finance_db_path, self, subscriptions_content)
 
     def refresh_matching(self, advance_if_complete: bool = False) -> None:
-        """Reapply matching while preserving the review position."""
+        """Reapply matching while preserving the review position.
+
+        Args:
+            advance_if_complete: Whether matching may release a newly completed transaction.
+        """
         self.review.refresh_matching(advance_if_complete)
 
     def refresh_after_edit(self, transaction_id: str) -> None:
-        """Keep the edited transaction visible."""
+        """Keep the edited transaction visible.
+
+        Args:
+            transaction_id: Stable ID of the edited transaction.
+        """
         self.review.refresh_after_edit(transaction_id)
 
     def render_transactions(self) -> None:

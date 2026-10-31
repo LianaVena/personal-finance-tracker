@@ -1,65 +1,74 @@
-# Personal Finance Tracker - Agent Instructions
+# Personal Finance Tracker — Agent Instructions
 
-## Restricted files and private data
+## Project and operating mode
 
-- Never read, open, search, inspect, summarize, copy, modify, or enumerate file contents inside `imports/` or `secrets/`
-  (including `secrets/gmail/`).
-- Never read, open, inspect, query, copy, or modify `transactions.db` or `finance.db`.
-- Never read or process live Gmail credentials, OAuth client secrets, access tokens, refresh tokens, email messages,
-  Gmail API responses, or real account data.
-- Never include restricted contents in prompts, context, terminal output, logs, test results, bug reports, or external
-  requests.
-- Do not run commands, the application, integration tests, or scripts that access restricted project paths, authenticate
-  to Gmail, or call the live Gmail API.
-- These restrictions apply even when asked to scan the whole project, and even if a tool or command could technically
-  access a restricted path.
-- If you need examples from restricted data, ask for sanitized examples or create synthetic fixtures instead.
+- This is a local Python, SQLite, and NiceGUI personal-finance application that imports transactions from Fio banka SK
+  and Tatra banka SK.
+- **Work in read-only mode.** Inspect permitted source code, explain findings, and propose changes, but do not create,
+  modify, delete, or move project files. Do not interpret approval to run a command as approval to edit files.
+- When asked for code changes, describe the intended changes and, if supported, use a native **non-applying** change
+  preview. If the integration cannot provide a reviewable proposal without applying it, explain that limitation. Never
+  claim a printed diff is an IDE approval action.
+- Do not modify project files indirectly through shell commands, Python scripts, redirects, formatters, Git operations,
+  or tools that bypass read-only mode. If the user deliberately changes the operating mode later, obtain explicit
+  authorization before edits and use the IDE's native reviewed-edit workflow.
+
+## Confidential data — never access
+
+- Never read, open, query, search, index, summarize, copy, upload, modify, or inspect contents of `imports/` or
+  `secrets/` (including `secrets/gmail/`). Do not enumerate files inside these directories.
+- Never open, query, read, copy, modify, rebuild, or migrate `finance.db` or `transactions.db`. Treat related `-wal`,
+  `-shm`, `-journal`, backups, exports, and temporary copies as confidential too.
+- Never inspect real bank transactions, account numbers, email messages, Gmail API responses, OAuth client secrets,
+  access or refresh tokens, or other personal financial data, wherever located.
+- Never place private data in prompts, model context, terminal output, diagnostic logs, test output, issue reports,
+  commits, or network requests.
+- Do not run the real banking application, live integrations, database migrations, or scripts/tests that could open the
+  restricted data. Use mocks, in-memory databases, and synthetic fixtures instead.
+- These restrictions remain in force even if a command, IDE tool, MCP server, or sandbox unexpectedly allows access. If
+  real data is needed to understand a problem, ask the user for **sanitized** examples.
+
+## Sandbox and security configuration
+
+- **PyCharm ACP:** The intended environment is PyCharm launched inside Sandboxie Plus box `BankingAI`, with the agent in
+  **Read-only** mode. Sandboxie has a direct-access rule for ordinary project files and tested blocked access for
+  `imports/`, `finance.db*`, and `transactions.db*`.
+- **Standalone Codex CLI:** Preserve the project's `.codex/config.toml`, including the `banking-safe` permission
+  profile, MXC backend, approval policy, network setting, and existing deny rules. The interactive CLI has passed
+  targeted file-access tests; this does not authorize attempts to reach private data.
+- The PyCharm ACP adapter uses a separate compatible Windows sandbox configuration inside Sandboxie. Do not overwrite
+  its settings with the standalone MXC configuration or turn off Sandboxie's blocking rules.
+- Never launch an unsandboxed agent as a workaround, request elevated file access, disable restrictions, or use
+  outside-the-sandbox tools to reach protected files. If sandboxing fails or is uncertain, stop operations involving
+  local files and tell the user.
+- **Important:** Access to `secrets/` has not been verified as blocked by the existing Sandboxie/CLI tests. Before
+  storing real credentials there, the user must separately configure and verify a Sandboxie **Closed** rule and a
+  corresponding standalone `banking-safe` deny rule. Do not assume instructions alone enforce this boundary.
+- Keep sensitive paths excluded from version control (`.gitignore`). Keep `.geminiignore` if Gemini tools are used.
+  `.aiignore` was intentionally removed; do not recreate it without a request. Ignore files and `AGENTS.md` are
+  defense-in-depth, **not** operating-system access controls.
 
 ## Gmail integration boundaries
 
-- The real application's Gmail OAuth client credentials and tokens must live **inside the project root** at
-  `secrets/gmail/credentials.json` and `secrets/gmail/token.json`, respectively. The user supplies and authorizes them
-  manually; an AI agent must not create real credentials or open this directory.
-- It is permitted to **write source code** that refers to these paths so the application can authenticate at runtime. It
-  is **not** permitted for the agent to use the credentials, initiate OAuth, refresh tokens, or run live Gmail requests.
-- Never hardcode credentials, tokens, email messages, or account identifiers into source code, fixtures, configuration,
+- If Gmail integration is implemented, the intended local runtime paths are `secrets/gmail/credentials.json` and
+  `secrets/gmail/token.json`. The user, not the AI, supplies and authorizes the real credentials.
+- Source code may refer to these paths, but the agent must not create or inspect real credentials, initiate OAuth,
+  refresh tokens, connect to live Gmail, or send Gmail content to an AI service.
+- Never hardcode tokens, credentials, email contents, account identifiers, or private data into source code, fixtures,
   or documentation.
-- Never send Gmail data to an AI model or external AI service. Keep Gmail API integration local to the Python
-  application.
-- Unit tests may use fake OAuth responses, mock Gmail clients, and synthetic temporary files located **outside the real
-  project `secrets/` directory**. No real network access is needed for these tests.
-- Preserve the existing `banking-safe` Codex permission profile, sandbox, network settings, and approval settings. Add
-  an explicit **read/write `deny`** for the project `secrets/` directory to the existing active profile in
-  `.codex/config.toml`, without replacing the profile or broadening access elsewhere. Keep existing deny rules for
-  `imports/`, `transactions.db`, and `finance.db`.
-- Ensure `secrets/` is excluded in `.gitignore`, `.aiignore`, and `.geminiignore`; preserve their existing entries. Keep
-  `.aiignore` enabled in JetBrains AI Assistant and verify Gemini's ignore-file setting is active when applicable.
-- Ignore files and these written instructions are **not** substitutes for actual sandbox filesystem restrictions. Never
-  switch to an unrestricted sandbox or elevate permissions to access `secrets/`.
-- Do not commit or upload credentials, tokens, backups, temporary copies, or email data. Never print secret values while
-  checking exclusions.
+- Use fake credentials, mocked Gmail clients and responses, and synthetic temporary files **outside** the real
+  `secrets/` directory for development examples or tests.
+- Do not expand the Gmail integration beyond the explicitly requested feature.
 
-## Allowed work
+## Coding and review boundaries
 
-- You may inspect other project source files, excluding all restricted paths and private content above.
-- Propose code changes and explain their purpose.
-- Obtain explicit approval before modifying files.
-- Do not change existing database schemas, perform migrations, or modify or rebuild real transaction databases.
-- Limit modifications to the requested feature; do not implement later Gmail search or user-interface steps without
-  authorization.
-
-## Code editing and review
-
-- For source-code changes, use the agent's native structured file-editing tool (prefer `apply_patch`) so JetBrains Air
-  can handle the edit as a file-change operation, not as printed text or a shell command.
-- Do not first print a proposed unified diff in chat or ask me to type "approve" in chat. Submit the proposed edit
-  through the native tool, allowing the host to present its approval interface if supported.
-- Use Read-only / Ask permission mode when I require approval before edits. Never bypass the host's permission prompt or
-  treat command approval as approval to modify files.
-- When the host offers a native proposed-change diff, let me inspect it and approve or reject it there. Never replace
-  that UI with a raw patch, Markdown code block, or full-file replacement in chat.
-- Never modify source files using Python scripts, shell commands, redirections, or other indirect file-writing methods.
-- If the integration cannot submit an edit for native pre-apply review, stop and explain that limitation. Do not claim a
-  printed diff is approvable, and do not silently switch to editing without approval.
-- After an approved edit, use Air's Review / Show Diff feature to verify the actual changes. Run tests only after
-  changes are applied, and only when they cannot touch restricted paths or live services.
+- You may inspect non-confidential source code, schema definitions, tests, and documentation needed for the requested
+  task. Keep exploration focused; do not broadly scan the repository when unnecessary.
+- Preserve existing database formats and import behavior unless the user explicitly requests a design change. Never
+  perform migrations or change real databases.
+- Favor precise, minimal changes, preserve the existing architecture, and explain meaningful security or correctness
+  implications.
+- Only suggest or run tests whose behavior is understood and which cannot access real databases, imports, secrets, or
+  live services. Do not run commands with unexpected filesystem or network effects.
+- Keep all external lookups limited to public documentation or non-sensitive material. Never send local financial or
+  Gmail data to third parties.
